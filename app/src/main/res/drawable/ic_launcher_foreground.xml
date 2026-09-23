@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group>
+        <!-- Left Wing of M -->
+        <path
+            android:fillColor="#006978"
+            android:pathData="M30,34 L42,34 L42,66 L30,60 Z" />
+        <path
+            android:fillColor="#0097A7"
+            android:pathData="M42,34 L50,45 L42,54 Z" />
+
+        <!-- Right Wing of M -->
+        <path
+            android:fillColor="#006978"
+            android:pathData="M66,34 L78,34 L78,60 L66,66 Z" />
+        <path
+            android:fillColor="#0097A7"
+            android:pathData="M66,34 L58,45 L66,54 Z" />
+
+        <!-- Central Fetch Arrow -->
+        <path
+            android:fillColor="#00838F"
+            android:pathData="M51,28 L57,28 L57,60 L51,60 Z" />
+        <path
+            android:fillColor="#00ACC1"
+            android:pathData="M54,76 L66,60 L42,60 Z" />
+    </group>
+</vector>

@@ -1,0 +1,15 @@
+.gradle/
+.idea/
+build/
+local.properties
+**/build/
+*.iml
+*.hprof
+*.jks
+*.keystore
+reports/
+__pycache__/
+*.pyc
+revanced-manager-downloaders/
+*.apk
+.DS_Store
