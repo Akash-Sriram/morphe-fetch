@@ -183,21 +183,13 @@ jobs:
           fi
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag exists. Updating release assets and notes..."
-            for file in dist/*; do
-              asset_name=$(basename "$file")
-              gh release delete-asset "$tag" "$asset_name" -y 2>/dev/null || true
-              gh release upload "$tag" "$file"
-            done
-            gh release edit "$tag" \
-              --title "Morphe Fetch ${tag}" \
-              --notes-file release-notes.md \
-              $prerelease_opt
-          else
-            echo "Creating new release $tag..."
-            gh release create "$tag" dist/* \
-              --target "${GITHUB_SHA}" \
-              --title "Morphe Fetch ${tag}" \
-              --notes-file release-notes.md \
-              $prerelease_opt
+            echo "Release $tag already exists. Deleting prior release..."
+            gh release delete "$tag" -y || true
           fi
+
+          echo "Creating new release $tag..."
+          gh release create "$tag" dist/* \
+            --target "${GITHUB_SHA}" \
+            --title "Morphe Fetch ${tag}" \
+            --notes-file release-notes.md \
+            $prerelease_opt
