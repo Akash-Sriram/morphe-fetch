@@ -184,7 +184,11 @@ jobs:
 
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release $tag exists. Updating release assets and notes..."
-            gh release upload "$tag" dist/* --clobber
+            for file in dist/*; do
+              asset_name=$(basename "$file")
+              gh release delete-asset "$tag" "$asset_name" -y 2>/dev/null || true
+              gh release upload "$tag" "$file"
+            done
             gh release edit "$tag" \
               --title "Morphe Fetch ${tag}" \
               --notes-file release-notes.md \
