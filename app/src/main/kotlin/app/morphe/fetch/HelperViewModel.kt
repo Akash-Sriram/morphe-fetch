@@ -67,38 +67,27 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             .create(ApkPureApi::class.java)
     }
 
-    private val aptoideApi by lazy {
-        Retrofit.Builder()
-            .client(client)
-            .baseUrl("https://ws75.aptoide.com/api/7/")
-            .addConverterFactory(GsonConverterFactory.create(gson))
-            .build()
-            .create(AptoideApi::class.java)
-    }
 
     private val parsers: Map<DownloadSource, ApkSourceParser> by lazy {
         val parserContext = SourceParserContext(
             fetcher = OkHttpSourceTextFetcher(
                 client,
-                hostGapsMillis = mapOf("www.apkmirror.com" to APKMIRROR_REQUEST_GAP_MS)
+                hostGapsMillis = mapOf("apkmirror.com" to APKMIRROR_REQUEST_GAP_MS, "uptodown.com" to 500L)
             ),
-            apkPureApi = apkPureApi,
-            aptoideApi = aptoideApi
+            apkPureApi = apkPureApi
         )
         val apkMirrorParserContext = SourceParserContext(
             fetcher = OkHttpSourceTextFetcher(
                 apkMirrorClient,
-                hostGapsMillis = mapOf("www.apkmirror.com" to APKMIRROR_REQUEST_GAP_MS)
+                hostGapsMillis = mapOf("apkmirror.com" to APKMIRROR_REQUEST_GAP_MS, "uptodown.com" to 500L)
             ),
-            apkPureApi = apkPureApi,
-            aptoideApi = aptoideApi
+            apkPureApi = apkPureApi
         )
         listOf(
             ApkMirrorParser(apkMirrorParserContext),
             UptodownParser(parserContext),
             ApkPureParser(parserContext),
-            ApkComboParser(parserContext),
-            AptoideParser(parserContext)
+            ApkComboParser(parserContext)
         ).associateBy { it.source }
     }
 
@@ -133,7 +122,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         get() {
             val disabled = helperSettings.disabledSources
             return if (disabled.size >= DownloadSource.entries.size) {
-                disabled - DownloadSource.PLAY
+                disabled - DownloadSource.APK_PURE
             } else {
                 disabled
             }
@@ -166,7 +155,11 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    fun searchPackage(packageName: String, appName: String? = null) {
+    fun searchPackage(
+        packageName: String,
+        appName: String? = null,
+        targetSource: DownloadSource? = null
+    ) {
         val cleanPkg = packageName.trim()
         if (cleanPkg.isBlank()) return
         val catalogMatch = MorpheArchive.findBestMatch(cleanPkg)
@@ -184,7 +177,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             compatibleVersionNames = emptySet(),
             compatibleVersionCodes = emptySet(),
             supportedAbis = emptyList(),
-            requestedFileType = "apk",
+            requestedFileType = null,
             allowSplitArchive = true,
             stockInstallRequired = false,
             fallbackWebUrl = "",
@@ -193,7 +186,30 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         request = searchReq
         startRequestLog(searchReq)
         offerExistingDownloadIfPresent(searchReq)
-        loadCandidates()
+
+        val effectivePreferred = targetSource ?: helperSettings.preferredSource
+        val initialResult = candidateResolver.initialCandidateResult(
+            request = searchReq,
+            effectiveDisabledSources = effectiveDisabledSources,
+            preferredSource = effectivePreferred
+        )
+        uiState = UiState.Ready(initialResult)
+
+        appendLog(
+            "Ready. Manual links prepared for " +
+                "${DownloadSource.entries.count { it !in effectiveDisabledSources }} sources."
+        )
+
+        if (targetSource != null) {
+            val targetIdx = initialResult.sourceGroups.indexOfFirst { it.source == targetSource }
+            selectedPagerPage = if (targetIdx >= 0) 1 + targetIdx else 0
+            resolveCandidates(targetSource, CandidateOption.LATEST)
+        } else {
+            selectedPagerPage = 0
+            initialResult.sourceGroups.forEach { group ->
+                resolveCandidates(group.source, CandidateOption.LATEST)
+            }
+        }
     }
 
     fun clearRequest() {
@@ -210,11 +226,21 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
 
     fun loadCandidates() {
         val activeRequest = request ?: return
-        uiState = UiState.Ready(initialCandidateResult(activeRequest))
+        val initial = initialCandidateResult(activeRequest)
+        uiState = UiState.Ready(initial)
+        selectedPagerPage = 0
         appendLog(
             "Ready. Manual links prepared for " +
                 "${DownloadSource.entries.count { it !in effectiveDisabledSources }} sources."
         )
+        initial.sourceGroups.forEach { group ->
+            val option = if (group.source.supportsRecommended && activeRequest.hasRequestedVersionRequest) {
+                CandidateOption.REQUESTED
+            } else {
+                CandidateOption.LATEST
+            }
+            resolveCandidates(group.source, option)
+        }
     }
 
     fun resolveCandidates(source: DownloadSource, option: CandidateOption) {
@@ -288,7 +314,6 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
 
             val preferred = helperSettings.preferredSource
             val defaultOrder = listOf(
-                DownloadSource.APTOIDE,
                 DownloadSource.APK_PURE,
                 DownloadSource.APK_MIRROR,
                 DownloadSource.UPTODOWN,
@@ -317,7 +342,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                     }
                 )
 
-                val directMatch = outcome.candidates
+                var directMatch = outcome.candidates
                     .filter { candidate ->
                         candidate.directDownload &&
                             candidate.formatMatches &&
@@ -328,6 +353,41 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                         val idx = currentReq.availableAbis.indexOfFirst { it.equals(arch, ignoreCase = true) }
                         if (idx >= 0) idx else if (arch.isUniversalArchLabel()) 10 else 999
                     }
+
+                if (directMatch == null && src == DownloadSource.UPTODOWN) {
+                    val indirectMatch = outcome.candidates
+                        .filter { candidate ->
+                            !candidate.directDownload &&
+                                candidate.formatMatches &&
+                                currentReq.isRequestedMatch(candidate)
+                        }
+                        .minByOrNull { candidate ->
+                            val arch = candidate.variantLabel?.lowercase(Locale.US) ?: ""
+                            val idx = currentReq.availableAbis.indexOfFirst { it.equals(arch, ignoreCase = true) }
+                            if (idx >= 0) idx else if (arch.isUniversalArchLabel()) 10 else 999
+                        }
+                    if (indirectMatch != null) {
+                        appendLog("Auto-fetch: Attempting background verification for Uptodown (${indirectMatch.versionDisplay})...")
+                        val context = getApplication<Application>()
+                        val targetUrl = indirectMatch.captchaUrl ?: indirectMatch.url
+                        val resolvedUrl = UptodownHeadlessResolver.resolveDownloadUrl(context, targetUrl, timeoutMs = 9500L)
+                        if (resolvedUrl != null) {
+                            appendLog("Auto-fetch: Background verification passed! Starting download...")
+                            directMatch = indirectMatch.copy(
+                                url = resolvedUrl,
+                                directDownload = true,
+                                files = listOf(
+                                    CandidateDownloadFile(
+                                        url = resolvedUrl,
+                                        fileName = capturedDownloadFileName(indirectMatch, resolvedUrl, indirectMatch.fileKind),
+                                        referer = targetUrl,
+                                        cookieHeader = CookieManager.getInstance().getCookie(targetUrl)
+                                    )
+                                )
+                            )
+                        }
+                    }
+                }
 
                 if (directMatch != null) {
                     appendLog("Auto-fetch: Verified match on ${src.label} (${directMatch.versionDisplay}). Starting download...")
@@ -561,7 +621,37 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun openCaptchaBrowser(candidate: DownloadCandidate) {
-        if (candidate.source == DownloadSource.PLAY) return
+        if (candidate.source == DownloadSource.UPTODOWN) {
+            viewModelScope.launch {
+                appendLog(
+                    "Uptodown: Attempting background verification for ${candidate.versionDisplay}...",
+                    LogLevel.Info
+                )
+                val context = getApplication<Application>()
+                val targetUrl = candidate.captchaUrl ?: candidate.url
+                val resolvedUrl = UptodownHeadlessResolver.resolveDownloadUrl(context, targetUrl, timeoutMs = 9500L)
+                if (resolvedUrl != null) {
+                    appendLog(
+                        "Uptodown: Background verification passed! Starting download...",
+                        LogLevel.Info
+                    )
+                    val capture = BrowserDownloadCapture(
+                        downloadUrl = resolvedUrl,
+                        refererUrl = targetUrl,
+                        cookieHeader = CookieManager.getInstance().getCookie(targetUrl)
+                    )
+                    handleCapturedDownload(candidate, capture)
+                    return@launch
+                }
+                appendLog(
+                    "Uptodown: Background verification inconclusive. Opening in-app browser.",
+                    LogLevel.Info
+                )
+                captchaBrowser = candidate
+            }
+            return
+        }
+
         appendLog(
             "Opening in-app browser for ${candidate.source.label} to solve the captcha.",
             LogLevel.Info
@@ -576,7 +666,12 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     fun onBrowserDownloadCaptured(capture: BrowserDownloadCapture) {
         val candidate = captchaBrowser ?: return
         captchaBrowser = null
-        val fileKind = fileKindFromUrl(capture.downloadUrl)
+        handleCapturedDownload(candidate, capture)
+    }
+
+    private fun handleCapturedDownload(candidate: DownloadCandidate, capture: BrowserDownloadCapture) {
+        val detectedKind = fileKindFromUrl(capture.downloadUrl)
+        val fileKind = if (detectedKind != "apk") detectedKind else candidate.fileKind.takeIf { it.isNotBlank() } ?: "apk"
         val referer = capture.refererUrl
             ?.takeIf(String::isNotBlank)
             ?: candidate.captchaUrl
@@ -584,7 +679,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         val cookieHeader = capture.cookieHeader
             ?: CookieManager.getInstance().getCookie(referer)
         appendLog(
-            "Captured download link from ${candidate.source.label} in the in-app browser " +
+            "Captured download link from ${candidate.source.label} " +
                 "($fileKind): ${capture.downloadUrl}",
             LogLevel.Info
         )
@@ -771,7 +866,6 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                 runCatching {
                     val file = FileHandoffHelper.copyPickedFileToTemporary(context, activeRequest, candidate, uri)
                     validateDownloadedArtifact(context, activeRequest, candidate, file)
-                    file
                 }
             }
 

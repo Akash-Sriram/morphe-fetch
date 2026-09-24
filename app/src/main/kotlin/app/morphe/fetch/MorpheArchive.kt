@@ -1,7 +1,13 @@
 package app.morphe.fetch
 
+import android.util.Log
 import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -237,11 +243,21 @@ internal object MorpheArchive {
 
     @Volatile
     var cachedIndex: MorpheArchiveIndex? = null
-        private set
+        internal set
+
+    private val _indexState = MutableStateFlow<MorpheArchiveIndex?>(null)
+    val indexState: StateFlow<MorpheArchiveIndex?> = _indexState.asStateFlow()
+
+    private val fetchMutex = Mutex()
 
     suspend fun getOrFetchIndex(): MorpheArchiveIndex {
         cachedIndex?.let { return it }
-        return runCatching { fetchIndex() }.getOrElse { cachedIndex ?: MorpheArchiveIndex() }
+        return fetchMutex.withLock {
+            cachedIndex?.let { return it }
+            runCatching { fetchIndex() }
+                .onFailure { Log.w(TAG, "Failed to fetch archive index", it) }
+                .getOrElse { cachedIndex ?: MorpheArchiveIndex() }
+        }
     }
 
     suspend fun fetchIndex(): MorpheArchiveIndex = withContext(Dispatchers.IO) {
@@ -257,10 +273,11 @@ internal object MorpheArchive {
             if (!response.isSuccessful) {
                 error("Index request failed: HTTP ${response.code}")
             }
-            val body = response.body?.string().orEmpty()
+            val body = response.body.string()
             val parsed = gson.fromJson(body, MorpheArchiveData::class.java)
             val index = MorpheArchiveIndex(generatedAt = parsed.generatedAt, apps = parsed.apps)
             cachedIndex = index
+            _indexState.value = index
             index
         }
     }
@@ -283,16 +300,24 @@ internal object MorpheArchive {
         )
     }
 
-    /**
-     * Resolves an exact or best match ArchiveApp for a query string (e.g. "YouTube" -> com.google.android.youtube).
-     */
-    fun findBestMatch(query: String): ArchiveApp? {
+    fun findExactMatch(query: String): ArchiveApp? {
         val q = query.trim().lowercase(Locale.US)
         if (q.isBlank()) return null
         val apps = cachedIndex?.apps ?: return null
         return apps.firstOrNull { it.packageName.equals(q, ignoreCase = true) }
             ?: apps.firstOrNull { it.name.equals(q, ignoreCase = true) }
-            ?: searchCatalog(query).firstOrNull()
+    }
+
+    /**
+     * Resolves an exact or unambiguous single match ArchiveApp for a query string.
+     */
+    fun findBestMatch(query: String): ArchiveApp? {
+        val exact = findExactMatch(query)
+        if (exact != null) return exact
+        val q = query.trim()
+        if (q.contains('.') && !q.contains(' ')) return null
+        val results = searchCatalog(query)
+        return if (results.size == 1) results.first() else null
     }
 
     /**

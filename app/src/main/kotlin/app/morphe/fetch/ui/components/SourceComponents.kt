@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.OpenInBrowser
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
@@ -37,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,54 +88,84 @@ internal fun SourcePickerFlow(
         return
     }
 
-    val initialPage = selectedPagerPage.coerceIn(0, (groups.size - 1).coerceAtLeast(0))
+    val maxPage = groups.size
+    val initialPage = selectedPagerPage.coerceIn(0, maxPage)
     var currentPage by rememberSaveable { mutableIntStateOf(initialPage) }
+    androidx.compose.runtime.LaunchedEffect(selectedPagerPage) {
+        currentPage = selectedPagerPage.coerceIn(0, maxPage)
+    }
     SideEffect { onPagerPageChanged(currentPage) }
 
-    val currentGroup = groups[currentPage.coerceIn(0, groups.lastIndex)]
+    val currentGroup = if (currentPage > 0) groups[(currentPage - 1).coerceIn(0, groups.lastIndex)] else null
 
-    val context = LocalContext.current
-    val openCandidateLink: (DownloadCandidate) -> Unit = { candidate ->
-        if (candidate.source == DownloadSource.PLAY) {
-            context.openPlayStoreListing(candidate.packageName, candidate.url)
+    val openCandidateLink: (DownloadCandidate) -> Unit = onSolveCaptcha
+
+    val action = remember(currentGroup, groups, request, currentPage) {
+        if (currentGroup != null) {
+            buildPrimaryAction(
+                request = request,
+                group = currentGroup,
+                onResolve = onResolve,
+                onDownload = onDownload,
+                onVersionHistory = onVersionHistory,
+                openLink = openCandidateLink
+            )
         } else {
-            onSolveCaptcha(candidate)
+            buildAllSourcesPrimaryAction(
+                groups = groups,
+                onResolveAll = {
+                    groups.forEach { group ->
+                        val targetOption = if (group.source.supportsRecommended && request.hasRequestedVersionRequest) {
+                            CandidateOption.REQUESTED
+                        } else {
+                            CandidateOption.LATEST
+                        }
+                        onResolve(group.source, targetOption)
+                    }
+                }
+            )
         }
-    }
-
-    val action = remember(currentGroup, request) {
-        buildPrimaryAction(
-            request = request,
-            group = currentGroup,
-            onResolve = onResolve,
-            onDownload = onDownload,
-            onVersionHistory = onVersionHistory,
-            openLink = openCandidateLink
-        )
     }
     SideEffect { onPrimaryActionChanged(action) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // Horizontal compact source chips
+        // Horizontal compact source chips: All Sources + individual sources
         SourceChipRow(
             groups = groups,
             selectedIndex = currentPage,
             onSelect = { currentPage = it }
         )
 
-        // Focused current source content
-        SourcePageContent(
-            request = request,
-            group = currentGroup,
-            onResolve = onResolve,
-            onDownload = onDownload,
-            onPickDownloadedFile = onPickDownloadedFile,
-            onUseInstalledApp = onUseInstalledApp,
-            onSolveCaptcha = onSolveCaptcha,
-            onVersionHistory = onVersionHistory,
-            onDownloadVersion = onDownloadVersion,
-            installedPackageRefreshToken = installedPackageRefreshToken
-        )
+        // Focused content
+        if (currentPage == 0) {
+            AllSourcesPageContent(
+                request = request,
+                groups = groups,
+                onResolve = onResolve,
+                onDownload = onDownload,
+                onPickDownloadedFile = onPickDownloadedFile,
+                onUseInstalledApp = onUseInstalledApp,
+                onSolveCaptcha = onSolveCaptcha,
+                onVersionHistory = onVersionHistory,
+                onDownloadVersion = onDownloadVersion,
+                installedPackageRefreshToken = installedPackageRefreshToken
+            )
+        } else {
+            currentGroup?.let { group ->
+                SourcePageContent(
+                    request = request,
+                    group = group,
+                    onResolve = onResolve,
+                    onDownload = onDownload,
+                    onPickDownloadedFile = onPickDownloadedFile,
+                    onUseInstalledApp = onUseInstalledApp,
+                    onSolveCaptcha = onSolveCaptcha,
+                    onVersionHistory = onVersionHistory,
+                    onDownloadVersion = onDownloadVersion,
+                    installedPackageRefreshToken = installedPackageRefreshToken
+                )
+            }
+        }
     }
 }
 
@@ -147,12 +179,13 @@ internal fun SourceChipRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(groups.size, key = { groups[it].source.name }) { index ->
-            val group = groups[index]
-            val selected = index == selectedIndex
-            val hasCandidate = group.source != DownloadSource.PLAY &&
+        // Tab 0: All Sources
+        item(key = "all_sources") {
+            val selected = selectedIndex == 0
+            val anyHasCandidate = groups.any { group ->
                 ((group.latest as? ResolveState.Done)?.candidates?.isNotEmpty() == true ||
                     (group.recommended as? ResolveState.Done)?.candidates?.isNotEmpty() == true)
+            }
 
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -172,7 +205,63 @@ internal fun SourceChipRow(
                 ),
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable { onSelect(index) }
+                    .clickable { onSelect(0) }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Layers,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "All Sources",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    )
+                    if (anyHasCandidate) {
+                        Icon(
+                            imageVector = Icons.Outlined.CheckCircle,
+                            contentDescription = "Available",
+                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Tabs 1..N: Individual Sources
+        items(groups.size, key = { groups[it].source.name }) { index ->
+            val group = groups[index]
+            val tabIndex = index + 1
+            val selected = tabIndex == selectedIndex
+            val hasCandidate = ((group.latest as? ResolveState.Done)?.candidates?.isNotEmpty() == true ||
+                (group.recommended as? ResolveState.Done)?.candidates?.isNotEmpty() == true)
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                },
+                contentColor = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                border = BorderStroke(
+                    width = if (selected) 1.5.dp else 1.dp,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onSelect(tabIndex) }
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
@@ -196,6 +285,147 @@ internal fun SourceChipRow(
                 }
             }
         }
+    }
+}
+
+internal fun buildAllSourcesPrimaryAction(
+    groups: List<SourceCandidateGroup>,
+    onResolveAll: () -> Unit
+): PrimaryAction? {
+    val anyLoading = groups.any { it.latest is ResolveState.Loading || it.recommended is ResolveState.Loading }
+    if (anyLoading) {
+        return PrimaryAction(
+            label = "Checking sources…",
+            icon = Icons.Outlined.Search,
+            enabled = false,
+            loading = true,
+            run = {}
+        )
+    }
+    val allIdle = groups.all { it.latest is ResolveState.Idle && it.recommended is ResolveState.Idle }
+    if (allIdle) {
+        return PrimaryAction(
+            label = "Check All Sources",
+            icon = Icons.Outlined.Search,
+            enabled = true,
+            loading = false,
+            run = onResolveAll
+        )
+    }
+    return null
+}
+
+internal fun List<SourceCandidateGroup>.sortedForDisplay(request: HelperRequest): List<SourceCandidateGroup> {
+    return sortedWith(
+        compareBy<SourceCandidateGroup> { it.sortPriority(request) }
+            .thenBy { it.source.sortIndex }
+    )
+}
+
+internal fun SourceCandidateGroup.sortPriority(request: HelperRequest): Int {
+    val targetOption = if (source.supportsRecommended && request.hasRequestedVersionRequest) {
+        CandidateOption.REQUESTED
+    } else {
+        CandidateOption.LATEST
+    }
+    val primaryState = if (targetOption == CandidateOption.REQUESTED) recommended else latest
+    val primaryCandidates = (primaryState as? ResolveState.Done)?.candidates.orEmpty()
+    val otherCandidates = (latest as? ResolveState.Done)?.candidates.orEmpty()
+
+    return when {
+        // Provider has actual direct download APK for requested target
+        primaryCandidates.any { it.directDownload } -> 0
+        // Provider has candidates for requested target
+        primaryCandidates.isNotEmpty() -> 1
+        // Fallback: provider has direct APK for latest version
+        targetOption == CandidateOption.REQUESTED && otherCandidates.any { it.directDownload } -> 2
+        // Fallback: provider has any candidates for latest version
+        targetOption == CandidateOption.REQUESTED && otherCandidates.isNotEmpty() -> 3
+        // Provider is currently searching/loading
+        primaryState is ResolveState.Loading || (targetOption == CandidateOption.REQUESTED && latest is ResolveState.Loading) -> 4
+        // Provider is idle
+        primaryState is ResolveState.Idle -> 5
+        // No APKs found or error
+        else -> 6
+    }
+}
+
+@Composable
+internal fun AllSourcesPageContent(
+    request: HelperRequest,
+    groups: List<SourceCandidateGroup>,
+    onResolve: (DownloadSource, CandidateOption) -> Unit,
+    onDownload: (DownloadCandidate) -> Unit,
+    onPickDownloadedFile: (DownloadCandidate) -> Unit,
+    onUseInstalledApp: (DownloadCandidate) -> Unit,
+    onSolveCaptcha: (DownloadCandidate) -> Unit,
+    onVersionHistory: (DownloadSource) -> Unit,
+    onDownloadVersion: (DownloadCandidate) -> Unit,
+    installedPackageRefreshToken: Int
+) {
+    val sortedGroups = remember(groups, request.hasRequestedVersionRequest) {
+        groups.sortedForDisplay(request)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        sortedGroups.forEach { group ->
+            key(group.source) {
+                SourceSectionCard(
+                    request = request,
+                    group = group,
+                    onResolve = onResolve,
+                    onDownload = onDownload,
+                    onPickDownloadedFile = onPickDownloadedFile,
+                    onUseInstalledApp = onUseInstalledApp,
+                    onSolveCaptcha = onSolveCaptcha,
+                    onVersionHistory = onVersionHistory,
+                    onDownloadVersion = onDownloadVersion,
+                    installedPackageRefreshToken = installedPackageRefreshToken
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SourceSectionCard(
+    request: HelperRequest,
+    group: SourceCandidateGroup,
+    onResolve: (DownloadSource, CandidateOption) -> Unit,
+    onDownload: (DownloadCandidate) -> Unit,
+    onPickDownloadedFile: (DownloadCandidate) -> Unit,
+    onUseInstalledApp: (DownloadCandidate) -> Unit,
+    onSolveCaptcha: (DownloadCandidate) -> Unit,
+    onVersionHistory: (DownloadSource) -> Unit,
+    onDownloadVersion: (DownloadCandidate) -> Unit,
+    installedPackageRefreshToken: Int
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+        ) {
+            SourceAvatar(source = group.source, size = 20.dp)
+            Text(
+                text = group.source.label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        SourcePageContent(
+            request = request,
+            group = group,
+            onResolve = onResolve,
+            onDownload = onDownload,
+            onPickDownloadedFile = onPickDownloadedFile,
+            onUseInstalledApp = onUseInstalledApp,
+            onSolveCaptcha = onSolveCaptcha,
+            onVersionHistory = onVersionHistory,
+            onDownloadVersion = onDownloadVersion,
+            installedPackageRefreshToken = installedPackageRefreshToken
+        )
     }
 }
 
@@ -544,8 +774,7 @@ internal fun VersionHistoryRow(
                 )
             }
             when {
-                (showOpenLink || (candidate.captchaUrl != null && !candidate.directDownload)) &&
-                    candidate.source != DownloadSource.PLAY -> {
+                showOpenLink || (candidate.captchaUrl != null && !candidate.directDownload) -> {
                     HelperButton(
                         text = "Captcha",
                         onClick = { onSolveCaptcha(candidate) },
@@ -556,13 +785,7 @@ internal fun VersionHistoryRow(
                 showOpenLink -> {
                     HelperOutlinedButton(
                         text = "Open",
-                        onClick = {
-                            if (candidate.source == DownloadSource.PLAY) {
-                                context.openPlayStoreListing(candidate.packageName, candidate.url)
-                            } else {
-                                onSolveCaptcha(candidate)
-                            }
-                        },
+                        onClick = { onSolveCaptcha(candidate) },
                         icon = Icons.Outlined.OpenInBrowser,
                         modifier = Modifier.widthIn(min = 90.dp)
                     )

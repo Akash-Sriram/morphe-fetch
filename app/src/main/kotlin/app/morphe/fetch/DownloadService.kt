@@ -317,13 +317,13 @@ internal class DownloadService : Service() {
             candidate,
             if (lastShaVerified) "SHA-256 verified \u2713 \u00b7 validating file…" else "Validating downloaded file…"
         )
-        validateDownloadedArtifact(
+        val validatedFile = validateDownloadedArtifact(
             this,
             job.request,
             candidate,
             file
         )
-        return file
+        return validatedFile
     }
 
     private fun handleSuccess(job: DownloadJobManager.DownloadJob, file: File) {
@@ -402,16 +402,28 @@ internal class DownloadService : Service() {
         val safeName = outputName.sanitizeFileName()
         val outputFile = File(downloadsDir, safeName)
         val stagedFile = File(downloadsDir, "$safeName.part")
-        downloader.downloadToFile(downloadFile, stagedFile) { copied, total ->
+        val downloadResult = downloader.downloadToFile(downloadFile, stagedFile) { copied, total ->
             updateDownloadProgress(candidate, copied, total)
         }
-        if (outputFile.exists()) outputFile.delete()
-        if (!stagedFile.renameTo(outputFile)) {
-            stagedFile.copyTo(outputFile, overwrite = true)
+        val targetExtension = fileKindFromUrl(downloadResult.finalUrl)
+            .takeIf { it in setOf("xapk", "apks", "apkm") }
+            ?: (outputFile.extension.takeIf { it in setOf("xapk", "apks", "apkm") })
+            ?: candidate.fileKind.takeIf { it in setOf("xapk", "apks", "apkm") }
+            ?: outputFile.extension
+
+        val finalOutputFile = if (!outputFile.extension.equals(targetExtension, ignoreCase = true)) {
+            File(downloadsDir, "${outputFile.nameWithoutExtension}.$targetExtension".sanitizeFileName())
+        } else {
+            outputFile
+        }
+
+        if (finalOutputFile.exists()) finalOutputFile.delete()
+        if (!stagedFile.renameTo(finalOutputFile)) {
+            stagedFile.copyTo(finalOutputFile, overwrite = true)
             stagedFile.delete()
         }
-        verifyExpectedSha256(candidate, downloadFile, outputFile)
-        return outputFile
+        verifyExpectedSha256(candidate, downloadFile, finalOutputFile)
+        return finalOutputFile
     }
 
     /**
@@ -780,19 +792,39 @@ internal fun validateDownloadedArtifact(
     candidate: DownloadCandidate,
     file: File,
     checkVersionCode: Boolean = false
-) {
+): File {
     val shouldValidateMetadata = candidate.fileKind.lowercase(Locale.US) in setOf("apk", "apks", "apkm", "xapk") ||
         file.extension.lowercase(Locale.US) in setOf("apk", "apks", "apkm", "xapk")
-    val metadata = context.readDownloadedApkMetadata(file) ?: run {
+    val validation = context.readDownloadedApkMetadataWithBundleCheck(file) ?: run {
         check(!shouldValidateMetadata) {
             file.delete()
             "Downloaded file could not be read as an APK.".withManualModeHint()
         }
-        return
+        return file
     }
+    val metadata = validation.metadata
+    val isBundle = validation.isBundle
+
+    val validatedFile = if (isBundle && file.extension.equals("apk", ignoreCase = true)) {
+        val target = File(file.parentFile, "${file.nameWithoutExtension}.xapk")
+        if (target.exists()) target.delete()
+        if (file.renameTo(target)) {
+            Log.i("DownloadService", "Renamed bundle artifact from ${file.name} to ${target.name}")
+            target
+        } else {
+            file
+        }
+    } else {
+        file
+    }
+
     val hardMismatches = buildList {
         if (metadata.packageName != request.packageName) {
-            add("Package: requested ${request.packageName}, found ${metadata.packageName}")
+            if (metadata.packageName == "com.uptodown") {
+                add("Uptodown served its store installer stub instead of ${request.packageName}. Select a direct architecture variant.")
+            } else {
+                add("Package: requested ${request.packageName}, found ${metadata.packageName}")
+            }
         }
 
         // A secondary build (e.g. APKMirror's "-SECONDARY") shares its version
@@ -819,7 +851,7 @@ internal fun validateDownloadedArtifact(
 
     // Wrong package or version name: the file is unusable  delete and fail.
     check(hardMismatches.isEmpty()) {
-        file.delete()
+        validatedFile.delete()
         "Downloaded file does not match Morphe request.\n${hardMismatches.joinToString("\n")}"
             .withManualModeHint()
     }
@@ -835,7 +867,7 @@ internal fun validateDownloadedArtifact(
             requestedCodes.isNotEmpty() &&
             metadata.versionCode !in requestedCodes
         ) {
-            throw VersionCodeMismatchException(file, metadata.versionCode)
+            throw VersionCodeMismatchException(validatedFile, metadata.versionCode)
         }
     }
 
@@ -853,13 +885,15 @@ internal fun validateDownloadedArtifact(
             foundName != null &&
             compareVersionNames(foundName, requestedName) <= 0
         ) {
-            file.delete()
+            validatedFile.delete()
             throw IllegalStateException(
                 "Downloaded \"latest\" version $foundName is not newer than " +
                     "requested $requestedName. Deleted the file."
             )
         }
     }
+
+    return validatedFile
 }
 
 

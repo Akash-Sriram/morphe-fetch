@@ -194,4 +194,19 @@ class ApkComboParserTest {
         assertTrue(candidates[0].formatMatches)
         assertEquals("apk", candidates[0].fileKind)
     }
+
+    @Test
+    fun findCandidates_unhostedPackageThrowsSourceAppNotFoundException() = runBlocking {
+        val unhostedPkg = "in.startv.hotstar"
+        val parser = ApkComboParser(
+            testParserContext(
+                pages = emptyMap()
+            )
+        )
+
+        val result = runCatching {
+            parser.findCandidates(testRequest(packageName = unhostedPkg), CandidateOption.LATEST)
+        }
+        assertTrue(result.exceptionOrNull() is SourceAppNotFoundException)
+    }
 }

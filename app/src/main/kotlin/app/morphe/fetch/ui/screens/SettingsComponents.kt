@@ -17,7 +17,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -793,41 +796,118 @@ internal fun RequestLogsCard(
             )
         }
 
-        if (logs.isEmpty()) {
-            InfoCard("No logs yet.")
+        var filterMode by remember { mutableStateOf("Relevant") }
+        val errorCount = logs.count { it.level == LogLevel.Error }
+        val filteredLogs = remember(logs, filterMode) {
+            when (filterMode) {
+                "Errors" -> logs.filter { it.level == LogLevel.Error }
+                "Relevant" -> logs.filterNot {
+                    it.message.contains("play.google.com/store/apps/details", ignoreCase = true) ||
+                        it.message.contains("f-droid.org/en/packages", ignoreCase = true) ||
+                        it.message.contains("play-lh.googleusercontent.com", ignoreCase = true)
+                }
+                else -> logs
+            }
+        }
+
+        // Filter chips row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf("Relevant", "Errors ($errorCount)", "All (${logs.size})").forEach { label ->
+                val mode = when {
+                    label.startsWith("Errors") -> "Errors"
+                    label.startsWith("All") -> "All"
+                    else -> "Relevant"
+                }
+                val selected = filterMode == mode
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { filterMode = mode }
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+
+        if (filteredLogs.isEmpty()) {
+            InfoCard(if (filterMode == "Errors") "No errors reported." else "No logs yet.")
         } else {
             SurfaceCard(cornerRadius = MorpheDefaults.CompactCornerRadius) {
                 SelectionContainer {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        logs.takeLast(80).forEach { entry ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.Top
+                        filteredLogs.takeLast(100).forEach { entry ->
+                            val isError = entry.level == LogLevel.Error
+                            val isWarning = entry.level == LogLevel.Warning
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = when {
+                                    isError -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+                                    isWarning -> SemanticTone.Warning.container.copy(alpha = 0.35f)
+                                    else -> androidx.compose.ui.graphics.Color.Transparent
+                                },
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = entry.time,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                )
-                                Text(
-                                    text = entry.level.badge,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = entry.level.color()
-                                )
-                                Text(
-                                    text = entry.message,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Text(
+                                        text = entry.time,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = when {
+                                            isError -> MaterialTheme.colorScheme.error
+                                            isWarning -> SemanticTone.Warning.accent
+                                            else -> MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                        contentColor = when {
+                                            isError -> MaterialTheme.colorScheme.onError
+                                            isWarning -> SemanticTone.Warning.content
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    ) {
+                                        Text(
+                                            text = entry.level.badge,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = entry.message,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                                        fontFamily = if (entry.message.startsWith("HTTP")) androidx.compose.ui.text.font.FontFamily.Monospace else androidx.compose.ui.text.font.FontFamily.Default,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
                         }
                     }

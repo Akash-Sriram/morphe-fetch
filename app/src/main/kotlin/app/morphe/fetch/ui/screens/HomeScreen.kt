@@ -16,14 +16,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Build
@@ -37,6 +43,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,6 +60,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -93,7 +101,7 @@ internal fun HelperScreen(
     onSendApkToMorphe: (DownloadHistoryEntry) -> Unit = {},
     onSolveCaptcha: (DownloadCandidate) -> Unit,
     onRequestFileTypeChange: (String) -> Unit,
-    onSearchPackage: (String) -> Unit,
+    onSearchPackage: (String, DownloadSource?) -> Unit,
     onClearRequest: () -> Unit,
     onDeliverPendingResult: ((PendingDownloadResult) -> Unit)? = null,
     updateState: UpdateState = UpdateState.Idle,
@@ -106,6 +114,9 @@ internal fun HelperScreen(
     var showAppBrowser by remember { mutableStateOf(false) }
     var pendingFilePick by remember { mutableStateOf<DownloadCandidate?>(null) }
     var primaryAction by remember { mutableStateOf<PrimaryAction?>(null) }
+    val enabledSources = remember(settings.disabledSources) {
+        DownloadSource.entries.filter { it !in settings.disabledSources }
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var historyEntries by remember { mutableStateOf<List<DownloadHistoryEntry>>(emptyList()) }
@@ -167,202 +178,495 @@ internal fun HelperScreen(
         color = MaterialTheme.colorScheme.background
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            val isExpanded = isExpandedScreen()
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (primaryAction == null) Modifier.navigationBarsPadding() else Modifier)
             ) {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = MorpheDefaults.ContentPadding, vertical = MorpheDefaults.ContentPadding),
-                    verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
-                ) {
-                    item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Morphe Fetch",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            HelperHeaderIconButton(
-                                icon = Icons.Outlined.Settings,
-                                contentDescription = "Settings",
-                                onClick = {
-                                    refreshHistory()
-                                    showSettings = true
-                                }
-                            )
-                        }
+                if (isExpanded) {
+                    // Tablet / Expanded Header
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = MorpheDefaults.ContentPadding, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Morphe Fetch",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        HelperHeaderIconButton(
+                            icon = Icons.Outlined.Settings,
+                            contentDescription = "Settings",
+                            onClick = {
+                                refreshHistory()
+                                showSettings = true
+                            }
+                        )
                     }
 
                     if (request == null) {
-                        item {
-                            EmptyLaunchState(
-                                onSearch = onSearchPackage,
-                                onOpenMorphe = onOpenMorphe,
-                                onFindApps = { showAppBrowser = true }
-                            )
-                        }
-                        if (historyEntries.isNotEmpty()) {
-                            item {
-                                MorpheSectionTitle(
-                                    text = "Downloaded APKs (${historyEntries.size})",
-                                    icon = Icons.Outlined.History
+                        // Tablet Idle: Left = Search / Find Apps, Right = Downloaded APKs
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = MorpheDefaults.ContentPadding),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(0.42f)
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(bottom = 24.dp),
+                                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                            ) {
+                                EmptyLaunchState(
+                                    onSearch = onSearchPackage,
+                                    onOpenMorphe = onOpenMorphe,
+                                    onFindApps = { showAppBrowser = true },
+                                    enabledSources = enabledSources,
+                                    isOverlayOpen = showSettings || showAppBrowser
                                 )
                             }
-                            items(historyEntries, key = { "${it.fileName}_${it.timestamp}" }) { entry ->
-                                CachedAppCard(
-                                    entry = entry,
-                                    onInstall = {
-                                        runCatching {
-                                            val uri = Uri.parse(entry.uri)
-                                            val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                                                setDataAndType(uri, fileNameMimeType(entry.fileName))
-                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+
+                            MorpheVerticalDivider(
+                                modifier = Modifier.fillMaxHeight().padding(vertical = 4.dp)
+                            )
+
+                            LazyColumn(
+                                modifier = Modifier
+                                    .weight(0.58f)
+                                    .fillMaxHeight(),
+                                contentPadding = PaddingValues(bottom = 32.dp),
+                                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                            ) {
+                                item {
+                                    MorpheSectionTitle(
+                                        text = "Downloaded APKs (${historyEntries.size})",
+                                        icon = Icons.Outlined.History
+                                    )
+                                }
+                                if (historyEntries.isNotEmpty()) {
+                                    items(historyEntries, key = { "${it.fileName}_${it.timestamp}" }) { entry ->
+                                        CachedAppCard(
+                                            entry = entry,
+                                            onInstall = {
+                                                runCatching {
+                                                    val uri = Uri.parse(entry.uri)
+                                                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                        setDataAndType(uri, fileNameMimeType(entry.fileName))
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    }
+                                                    context.startActivity(installIntent)
+                                                }
+                                            },
+                                            onSendToMorphe = {
+                                                onSendApkToMorphe(entry)
+                                            },
+                                            onShare = {
+                                                runCatching {
+                                                    val uri = Uri.parse(entry.uri)
+                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                        type = fileNameMimeType(entry.fileName)
+                                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    }
+                                                    context.startActivity(Intent.createChooser(shareIntent, "Share APK"))
+                                                }
+                                            },
+                                            onSearchAgain = { onSearchPackage(entry.packageName, null) },
+                                            onRemove = {
+                                                scope.launch(Dispatchers.IO) {
+                                                    DownloadHistoryStore.remove(context, entry)
+                                                    refreshHistory()
+                                                }
                                             }
-                                            context.startActivity(installIntent)
-                                        }
-                                    },
-                                    onSendToMorphe = {
-                                        onSendApkToMorphe(entry)
-                                    },
-                                    onShare = {
-                                        runCatching {
-                                            val uri = Uri.parse(entry.uri)
-                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                type = fileNameMimeType(entry.fileName)
-                                                putExtra(Intent.EXTRA_STREAM, uri)
-                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        )
+                                    }
+                                } else {
+                                    item {
+                                        SurfaceCard(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            cornerRadius = 16.dp
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(28.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                                    modifier = Modifier.size(52.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Icon(
+                                                            imageVector = Icons.Outlined.History,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.size(26.dp)
+                                                        )
+                                                    }
+                                                }
+                                                Text(
+                                                    text = "No downloaded APKs yet",
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Text(
+                                                    text = "APKs and split bundles you download will appear here with quick actions to send directly to Morphe Manager, install, or share.",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    textAlign = TextAlign.Center
+                                                )
                                             }
-                                            context.startActivity(Intent.createChooser(shareIntent, "Share APK"))
                                         }
-                                    },
-                                    onSearchAgain = { onSearchPackage(entry.packageName) },
-                                    onRemove = {
-                                        scope.launch(Dispatchers.IO) {
-                                            DownloadHistoryStore.remove(context, entry)
-                                            refreshHistory()
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Tablet Active: Left = App Info, Right = Candidates / Progress
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = MorpheDefaults.ContentPadding),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .weight(0.38f)
+                                    .fillMaxHeight(),
+                                contentPadding = PaddingValues(bottom = 24.dp),
+                                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                            ) {
+                                item {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MorpheSectionTitle(text = "App info", icon = Icons.Outlined.Smartphone)
+                                        AppInfoCard(
+                                            request = request,
+                                            onFormatSelected = onRequestFileTypeChange,
+                                            onClearRequest = onClearRequest
+                                        )
+                                    }
+                                }
+                            }
+
+                            MorpheVerticalDivider(
+                                modifier = Modifier.fillMaxHeight().padding(vertical = 4.dp)
+                            )
+
+                            LazyColumn(
+                                modifier = Modifier
+                                    .weight(0.62f)
+                                    .fillMaxHeight(),
+                                contentPadding = PaddingValues(bottom = 32.dp),
+                                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                            ) {
+                                when (state) {
+                                    UiState.Idle,
+                                    UiState.Loading -> item { LoadingState() }
+                                    is UiState.Ready -> {
+                                        item {
+                                            SourcePickerFlow(
+                                                request = request,
+                                                result = state.result,
+                                                selectedPagerPage = selectedPagerPage,
+                                                onPagerPageChanged = onPagerPageChanged,
+                                                onResolve = onResolve,
+                                                onDownload = onDownload,
+                                                onPickDownloadedFile = openDownloadedFilePicker,
+                                                onUseInstalledApp = onUseInstalledApp,
+                                                onSolveCaptcha = onSolveCaptcha,
+                                                onVersionHistory = onVersionHistory,
+                                                onDownloadVersion = onDownloadVersion,
+                                                onRefresh = onRefresh,
+                                                onCancel = handleCancel,
+                                                installedPackageRefreshToken = installedPackageRefreshToken,
+                                                onPrimaryActionChanged = { primaryAction = it }
+                                            )
                                         }
+                                    }
+                                    is UiState.CheckingPickedFile -> item { CheckingPickedFileState(state) }
+                                    is UiState.Downloading -> {
+                                        item {
+                                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                MorpheSectionTitle(text = "Download progress", icon = Icons.Outlined.Download)
+                                                DownloadingState(
+                                                    state = state,
+                                                    onCancel = onCancelDownload
+                                                )
+                                            }
+                                        }
+                                    }
+                                    is UiState.Completed -> {
+                                        item {
+                                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                MorpheSectionTitle(text = "Complete", icon = Icons.Outlined.CheckCircle)
+                                                DownloadCompleteCard(
+                                                    result = state.result,
+                                                    onInstall = {
+                                                        runCatching {
+                                                            val uri = Uri.parse(state.result.uri)
+                                                            val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                                setDataAndType(uri, "application/vnd.android.package-archive")
+                                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            }
+                                                            context.startActivity(installIntent)
+                                                        }
+                                                    },
+                                                    onShare = {
+                                                        runCatching {
+                                                            val uri = Uri.parse(state.result.uri)
+                                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                                type = "application/vnd.android.package-archive"
+                                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                            }
+                                                            context.startActivity(Intent.createChooser(shareIntent, "Share APK"))
+                                                        }
+                                                    },
+                                                    onSendToMorphe = {
+                                                        onDeliverPendingResult?.invoke(state.result)
+                                                    },
+                                                    onDone = {
+                                                        onClearRequest()
+                                                        refreshHistory()
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    is UiState.Error -> item {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            ErrorState(
+                                                message = state.message,
+                                                candidate = state.candidate,
+                                                onSolveCaptcha = onSolveCaptcha,
+                                                onRefresh = onRefresh,
+                                                onCancel = handleCancel
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Phone / Compact Single-Column Layout
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = MorpheDefaults.ContentPadding, vertical = MorpheDefaults.ContentPadding),
+                        verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                    ) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Morphe Fetch",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                HelperHeaderIconButton(
+                                    icon = Icons.Outlined.Settings,
+                                    contentDescription = "Settings",
+                                    onClick = {
+                                        refreshHistory()
+                                        showSettings = true
                                     }
                                 )
                             }
                         }
-                        return@LazyColumn
-                    }
 
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MorpheSectionTitle(text = "App info", icon = Icons.Outlined.Smartphone)
-                            AppInfoCard(
-                                request = request,
-                                onFormatSelected = onRequestFileTypeChange,
-                                onClearRequest = onClearRequest
-                            )
-                        }
-                    }
-                    when (state) {
-                        UiState.Idle,
-                        UiState.Loading -> item { LoadingState() }
-
-                        is UiState.Ready -> {
+                        if (request == null) {
                             item {
-                                SourcePickerFlow(
-                                    request = request,
-                                    result = state.result,
-                                    selectedPagerPage = selectedPagerPage,
-                                    onPagerPageChanged = onPagerPageChanged,
-                                    onResolve = onResolve,
-                                    onDownload = onDownload,
-                                    onPickDownloadedFile = openDownloadedFilePicker,
-                                    onUseInstalledApp = onUseInstalledApp,
-                                    onSolveCaptcha = onSolveCaptcha,
-                                    onVersionHistory = onVersionHistory,
-                                    onDownloadVersion = onDownloadVersion,
-                                    onRefresh = onRefresh,
-                                    onCancel = handleCancel,
-                                    installedPackageRefreshToken = installedPackageRefreshToken,
-                                    onPrimaryActionChanged = { primaryAction = it }
+                                EmptyLaunchState(
+                                    onSearch = onSearchPackage,
+                                    onOpenMorphe = onOpenMorphe,
+                                    onFindApps = { showAppBrowser = true },
+                                    enabledSources = enabledSources,
+                                    isOverlayOpen = showSettings || showAppBrowser
                                 )
                             }
-                        }
-
-                        is UiState.CheckingPickedFile -> item { CheckingPickedFileState(state) }
-                        is UiState.Downloading -> {
-                            item {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    MorpheSectionTitle(text = "Download progress", icon = Icons.Outlined.Download)
-                                    DownloadingState(
-                                        state = state,
-                                        onCancel = onCancelDownload
+                            if (historyEntries.isNotEmpty()) {
+                                item {
+                                    MorpheSectionTitle(
+                                        text = "Downloaded APKs (${historyEntries.size})",
+                                        icon = Icons.Outlined.History
                                     )
                                 }
-                            }
-                        }
-                        is UiState.Completed -> {
-                            item {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    MorpheSectionTitle(text = "Complete", icon = Icons.Outlined.CheckCircle)
-                                    DownloadCompleteCard(
-                                        result = state.result,
+                                items(historyEntries, key = { "${it.fileName}_${it.timestamp}" }) { entry ->
+                                    CachedAppCard(
+                                        entry = entry,
                                         onInstall = {
                                             runCatching {
-                                                val uri = Uri.parse(state.result.uri)
+                                                val uri = Uri.parse(entry.uri)
                                                 val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                                                    setDataAndType(uri, "application/vnd.android.package-archive")
+                                                    setDataAndType(uri, fileNameMimeType(entry.fileName))
                                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
                                                 }
                                                 context.startActivity(installIntent)
                                             }
                                         },
+                                        onSendToMorphe = {
+                                            onSendApkToMorphe(entry)
+                                        },
                                         onShare = {
                                             runCatching {
-                                                val uri = Uri.parse(state.result.uri)
+                                                val uri = Uri.parse(entry.uri)
                                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                    type = "application/vnd.android.package-archive"
+                                                    type = fileNameMimeType(entry.fileName)
                                                     putExtra(Intent.EXTRA_STREAM, uri)
                                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                                 }
                                                 context.startActivity(Intent.createChooser(shareIntent, "Share APK"))
                                             }
                                         },
-                                        onSendToMorphe = {
-                                            onDeliverPendingResult?.invoke(state.result)
-                                        },
-                                        onDone = {
-                                            onClearRequest()
-                                            refreshHistory()
+                                        onSearchAgain = { onSearchPackage(entry.packageName, null) },
+                                        onRemove = {
+                                            scope.launch(Dispatchers.IO) {
+                                                DownloadHistoryStore.remove(context, entry)
+                                                refreshHistory()
+                                            }
                                         }
                                     )
                                 }
                             }
+                            return@LazyColumn
                         }
-                        is UiState.Error -> item {
+
+                        item {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                ErrorState(
-                                    message = state.message,
-                                    candidate = state.candidate,
-                                    onSolveCaptcha = onSolveCaptcha,
-                                    onRefresh = onRefresh,
-                                    onCancel = handleCancel
+                                MorpheSectionTitle(text = "App info", icon = Icons.Outlined.Smartphone)
+                                AppInfoCard(
+                                    request = request,
+                                    onFormatSelected = onRequestFileTypeChange,
+                                    onClearRequest = onClearRequest
                                 )
+                            }
+                        }
+                        when (state) {
+                            UiState.Idle,
+                            UiState.Loading -> item { LoadingState() }
+
+                            is UiState.Ready -> {
+                                item {
+                                    SourcePickerFlow(
+                                        request = request,
+                                        result = state.result,
+                                        selectedPagerPage = selectedPagerPage,
+                                        onPagerPageChanged = onPagerPageChanged,
+                                        onResolve = onResolve,
+                                        onDownload = onDownload,
+                                        onPickDownloadedFile = openDownloadedFilePicker,
+                                        onUseInstalledApp = onUseInstalledApp,
+                                        onSolveCaptcha = onSolveCaptcha,
+                                        onVersionHistory = onVersionHistory,
+                                        onDownloadVersion = onDownloadVersion,
+                                        onRefresh = onRefresh,
+                                        onCancel = handleCancel,
+                                        installedPackageRefreshToken = installedPackageRefreshToken,
+                                        onPrimaryActionChanged = { primaryAction = it }
+                                    )
+                                }
+                            }
+
+                            is UiState.CheckingPickedFile -> item { CheckingPickedFileState(state) }
+                            is UiState.Downloading -> {
+                                item {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MorpheSectionTitle(text = "Download progress", icon = Icons.Outlined.Download)
+                                        DownloadingState(
+                                            state = state,
+                                            onCancel = onCancelDownload
+                                        )
+                                    }
+                                }
+                            }
+                            is UiState.Completed -> {
+                                item {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MorpheSectionTitle(text = "Complete", icon = Icons.Outlined.CheckCircle)
+                                        DownloadCompleteCard(
+                                            result = state.result,
+                                            onInstall = {
+                                                runCatching {
+                                                    val uri = Uri.parse(state.result.uri)
+                                                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                        setDataAndType(uri, "application/vnd.android.package-archive")
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    }
+                                                    context.startActivity(installIntent)
+                                                }
+                                            },
+                                            onShare = {
+                                                runCatching {
+                                                    val uri = Uri.parse(state.result.uri)
+                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                        type = "application/vnd.android.package-archive"
+                                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    }
+                                                    context.startActivity(Intent.createChooser(shareIntent, "Share APK"))
+                                                }
+                                            },
+                                            onSendToMorphe = {
+                                                onDeliverPendingResult?.invoke(state.result)
+                                            },
+                                            onDone = {
+                                                onClearRequest()
+                                                refreshHistory()
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            is UiState.Error -> item {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    ErrorState(
+                                        message = state.message,
+                                        candidate = state.candidate,
+                                        onSolveCaptcha = onSolveCaptcha,
+                                        onRefresh = onRefresh,
+                                        onCancel = handleCancel
+                                    )
+                                }
                             }
                         }
                     }
                 }
+
                 val action = primaryAction
                 if (action != null) {
-                    SourceBottomBar(action = action, onRefresh = onRefresh, onCancel = handleCancel)
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(modifier = Modifier.widthIn(max = MorpheDefaults.MaxContentWidth)) {
+                            SourceBottomBar(action = action, onRefresh = onRefresh, onCancel = handleCancel)
+                        }
+                    }
                 }
             }
 
@@ -404,7 +708,7 @@ internal fun HelperScreen(
                         onBack = { showAppBrowser = false },
                         onGetApk = { packageName, appName ->
                             showAppBrowser = false
-                            onSearchPackage(packageName)
+                            onSearchPackage(packageName, null)
                         }
                     )
                 }
@@ -487,15 +791,15 @@ private fun DownloadCompleteCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 HelperButton(
-                    text = "Install APK",
-                    icon = Icons.Outlined.InstallMobile,
-                    onClick = onInstall,
+                    text = "Send to Morphe",
+                    icon = Icons.Outlined.Build,
+                    onClick = onSendToMorphe,
                     modifier = Modifier.weight(1f)
                 )
                 HelperOutlinedButton(
-                    text = "Share",
-                    icon = Icons.Outlined.Share,
-                    onClick = onShare,
+                    text = "Install APK",
+                    icon = Icons.Outlined.InstallMobile,
+                    onClick = onInstall,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -505,9 +809,9 @@ private fun DownloadCompleteCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 HelperOutlinedButton(
-                    text = "Send to Morphe",
-                    icon = Icons.Outlined.Build,
-                    onClick = onSendToMorphe,
+                    text = "Share",
+                    icon = Icons.Outlined.Share,
+                    onClick = onShare,
                     modifier = Modifier.weight(1f)
                 )
                 HelperButton(
@@ -611,15 +915,15 @@ internal fun CachedAppCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     HelperButton(
-                        text = "Install",
-                        icon = Icons.Outlined.InstallMobile,
-                        onClick = onInstall,
-                        modifier = Modifier.weight(1f)
-                    )
-                    HelperOutlinedButton(
                         text = "Send to Morphe",
                         icon = Icons.Outlined.Build,
                         onClick = onSendToMorphe,
+                        modifier = Modifier.weight(1f)
+                    )
+                    HelperOutlinedButton(
+                        text = "Install",
+                        icon = Icons.Outlined.InstallMobile,
+                        onClick = onInstall,
                         modifier = Modifier.weight(1f)
                     )
                 }

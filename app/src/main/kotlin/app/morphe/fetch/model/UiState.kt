@@ -49,16 +49,10 @@ internal enum class SourceSubTab(
 }
 
 internal val DownloadSource.supportsRecommended: Boolean
-    get() = when (this) {
-        DownloadSource.PLAY -> false
-        else -> true
-    }
+    get() = true
 
 internal val DownloadSource.supportsHistory: Boolean
-    get() = when (this) {
-        DownloadSource.PLAY -> false
-        else -> true
-    }
+    get() = true
 
 /** A previously downloaded file offered for reuse, with its size on disk. */
 internal data class ReuseOption(

@@ -15,7 +15,7 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
         request: HelperRequest,
         option: CandidateOption
     ): List<DownloadCandidate> {
-        return uptodownDetailUrls(request)
+        val candidates = uptodownDetailUrls(request)
             .firstNotNullOfOrNull { detailUrl ->
                 runCatching {
                     when (option) {
@@ -29,6 +29,11 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
                     ?.takeIf(List<DownloadCandidate>::isNotEmpty)
             }
             .orEmpty()
+
+        if (candidates.isEmpty() && option != CandidateOption.MANUAL) {
+            throw SourceAppNotFoundException(request.packageName)
+        }
+        return candidates
     }
 
     override fun searchUrl(packageName: String): String? = uptodownSearchUrl(packageName)
@@ -139,6 +144,9 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
 
     private fun resolveUptodownSearchUrls(searchUrl: String): List<String> {
         val doc = fetchDocument(searchUrl)
+        if (doc.html().contains("empty-search")) {
+            return emptyList()
+        }
         return doc.select("a[href]")
             .asSequence()
             .map { it.absUrl("href") }
@@ -391,14 +399,20 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
         option: CandidateOption,
         variant: UptodownVariantFile
     ): DownloadCandidate? {
-        val tokenDoc = fetchDocument("$detailUrl/download/${variant.fileId}-x", referer = versionPageUrl)
+        val variantDownloadPage = "$detailUrl/download/${variant.fileId}-x"
+        val tokenDoc = fetchDocument(variantDownloadPage, referer = versionPageUrl)
         val fileKind = variant.fileKind.lowercase(Locale.US)
-        val directUrl = uptodownDownloadUrlFromPage(tokenDoc) ?: return null
+        val directUrl = uptodownDownloadUrlFromPage(tokenDoc)
         val variantLabel = variant.displayLabel()
         val variantFileSuffix = variantLabel.variantFileSuffix()
         // Uptodown's download page publishes the file's SHA-256 in its info
         // table. When present it verifies the downloaded bytes before handoff.
         val expectedSha256 = uptodownSha256FromPage(tokenDoc)
+        val isTurnstileGated = directUrl == null && (uptodownPageUsesTurnstile(tokenDoc) || tokenDoc.selectFirst("#detail-download-button") != null)
+
+        if (directUrl == null && !isTurnstileGated) {
+            return null
+        }
 
         return DownloadCandidate(
             source = DownloadSource.UPTODOWN,
@@ -406,22 +420,28 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
             packageName = request.packageName,
             versionName = versionName,
             versionCode = null,
-            url = directUrl,
+            url = directUrl ?: variantDownloadPage,
             fileKind = fileKind,
             option = option,
-            directDownload = true,
+            directDownload = directUrl != null,
             versionStatus = request.versionStatus(versionName, null),
             formatMatches = request.acceptsFormat(fileKind),
             variantLabel = variantLabel,
-            files = listOf(
-                CandidateDownloadFile(
-                    url = directUrl,
-                    fileName = "${request.packageName}-${versionName ?: option.name.lowercase(Locale.US)}-uptodown$variantFileSuffix.$fileKind"
-                        .sanitizeFileName(),
-                    referer = versionPageUrl,
-                    expectedSha256 = expectedSha256
+            note = if (isTurnstileGated) {
+                "Uptodown requires verification before revealing this variant download."
+            } else null,
+            captchaUrl = if (isTurnstileGated) variantDownloadPage else null,
+            files = directUrl?.let {
+                listOf(
+                    CandidateDownloadFile(
+                        url = it,
+                        fileName = "${request.packageName}-${versionName ?: option.name.lowercase(Locale.US)}-uptodown$variantFileSuffix.$fileKind"
+                            .sanitizeFileName(),
+                        referer = variantDownloadPage,
+                        expectedSha256 = expectedSha256
+                    )
                 )
-            )
+            }.orEmpty()
         )
     }
 

@@ -103,11 +103,20 @@ internal object MorpheDefaults {
     val ContentPaddingExpanded = 32.dp
     val ItemSpacing = 12.dp
 
+    val MaxContentWidth = 760.dp
+    val MasterPaneWidth = 380.dp
+
     val DefaultGradientColors = listOf(Color(0xFF1E5AA8), Color(0xFF00AFAE))
 
     const val ANIMATION_DURATION = 220
     const val ANIMATION_DURATION_SHORT = 180
     const val SCREEN_ENTER_DURATION = 320
     const val DIALOG_SCALE = 0.95f
+}
+
+@Composable
+internal fun isExpandedScreen(): Boolean {
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    return configuration.screenWidthDp >= 720
 }
 

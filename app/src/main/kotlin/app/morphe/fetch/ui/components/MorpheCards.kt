@@ -195,6 +195,22 @@ internal fun MorpheDivider(
     )
 }
 
+/** Vertical divider tinted the same way for multi-pane layouts. */
+@Composable
+internal fun MorpheVerticalDivider(
+    modifier: Modifier = Modifier
+) {
+    val outlineVariant = MaterialTheme.colorScheme.outlineVariant
+    val surfaceTint = MaterialTheme.colorScheme.surfaceTint
+    val color = remember(outlineVariant, surfaceTint) {
+        lerp(outlineVariant, surfaceTint, 0.18f).copy(alpha = 0.55f)
+    }
+    VerticalDivider(
+        modifier = modifier,
+        color = color
+    )
+}
+
 /** Row of optional leading content, title/description column and optional trailing content. */
 @Composable
 internal fun IconTextRow(

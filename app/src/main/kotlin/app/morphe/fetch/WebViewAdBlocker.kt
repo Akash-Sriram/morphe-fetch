@@ -23,9 +23,9 @@ internal object WebViewAdBlocker {
         "cloudflareinsights.com",
         "apkmirror.com",
         "uptodown.com",
+        "utdstc.com",
         "apkpure.com",
         "apkcombo.com",
-        "aptoide.com",
         "github.com",
         "githubusercontent.com"
     )

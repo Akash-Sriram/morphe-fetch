@@ -53,6 +53,7 @@ internal object ApkMirrorSessionWarmer {
             fun finish(ok: Boolean) {
                 if (!finished) {
                     finished = true
+                    runCatching { CookieManager.getInstance().flush() }
                     success.set(ok)
                     latch.countDown()
                     runCatching {
@@ -64,6 +65,7 @@ internal object ApkMirrorSessionWarmer {
 
             try {
                 webView = WebView(context.applicationContext).apply {
+                    layout(0, 0, 1080, 1920)
                     settings.userAgentString = MorpheHttpClient.browserUserAgent
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -88,8 +90,34 @@ internal object ApkMirrorSessionWarmer {
                     }
 
                     webViewClient = object : WebViewClient() {
+                        override fun onPageStarted(v: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                            super.onPageStarted(v, url, favicon)
+                            v?.evaluateJavascript(
+                                """
+                                (function() {
+                                    try {
+                                        Object.defineProperty(document, 'hidden', { value: false, writable: false });
+                                        Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: false });
+                                    } catch(e) {}
+                                })();
+                                """.trimIndent(),
+                                null
+                            )
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
                             cm.flush()
+                            view?.evaluateJavascript(
+                                """
+                                (function() {
+                                    try {
+                                        Object.defineProperty(document, 'hidden', { value: false, writable: false });
+                                        Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: false });
+                                    } catch(e) {}
+                                })();
+                                """.trimIndent(),
+                                null
+                            )
                             if (hasValidCfClearance()) {
                                 Log.i(TAG, "cf_clearance detected onPageFinished")
                                 finish(true)

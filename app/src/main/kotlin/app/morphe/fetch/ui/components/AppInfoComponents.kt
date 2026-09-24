@@ -3,6 +3,7 @@ package app.morphe.fetch
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -27,8 +29,11 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,8 +50,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -228,32 +236,94 @@ private fun InfoBadge(
 
 @Composable
 internal fun EmptyLaunchState(
-    onSearch: (String) -> Unit,
+    onSearch: (String, DownloadSource?) -> Unit,
     onOpenMorphe: () -> Unit,
-    onFindApps: () -> Unit
+    onFindApps: () -> Unit,
+    enabledSources: List<DownloadSource> = DownloadSource.entries,
+    isOverlayOpen: Boolean = false
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var selectedSource by remember { mutableStateOf<DownloadSource?>(null) }
+    var promptMessage by remember { mutableStateOf<String?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    var isSearchFocused by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            MorpheArchive.getOrFetchIndex()
-        }
-    }
+    val cachedIndex by MorpheArchive.indexState.collectAsState()
+    var isCatalogLoading by remember { mutableStateOf(false) }
 
     var suggestions by remember { mutableStateOf<List<ArchiveApp>>(emptyList()) }
 
-    LaunchedEffect(searchQuery, MorpheArchive.cachedIndex) {
+    val isSearching = !isOverlayOpen && (searchQuery.isNotEmpty() || suggestions.isNotEmpty() || isSearchFocused || promptMessage != null)
+    BackHandler(enabled = isSearching) {
+        searchQuery = ""
+        promptMessage = null
+        suggestions = emptyList()
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
+
+    LaunchedEffect(Unit) {
+        if (MorpheArchive.cachedIndex == null) {
+            isCatalogLoading = true
+            withContext(Dispatchers.IO) {
+                MorpheArchive.getOrFetchIndex()
+            }
+            isCatalogLoading = false
+        }
+    }
+
+    LaunchedEffect(searchQuery, cachedIndex) {
+        promptMessage = null
         val query = searchQuery.trim()
         if (query.isBlank()) {
             suggestions = emptyList()
             return@LaunchedEffect
         }
         delay(100)
-        val results = withContext(Dispatchers.Default) {
+        val results = withContext(Dispatchers.IO) {
+            if (MorpheArchive.cachedIndex == null) {
+                isCatalogLoading = true
+                MorpheArchive.getOrFetchIndex()
+                isCatalogLoading = false
+            }
             MorpheArchive.searchCatalog(query).take(30)
         }
         suggestions = results
+    }
+
+    val handleSearchSubmission = {
+        val q = searchQuery.trim()
+        if (q.isNotBlank()) {
+            val exactMatch = MorpheArchive.findExactMatch(q)
+            if (exactMatch != null) {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+                promptMessage = null
+                onSearch(exactMatch.packageName, selectedSource)
+            } else {
+                val currentMatches = if (suggestions.isNotEmpty()) suggestions else MorpheArchive.searchCatalog(q)
+                when {
+                    currentMatches.size == 1 -> {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        promptMessage = null
+                        onSearch(currentMatches.first().packageName, selectedSource)
+                    }
+                    currentMatches.size > 1 -> {
+                        keyboardController?.hide()
+                        suggestions = currentMatches.take(30)
+                        promptMessage = "Multiple apps match. Please select an app from the list below."
+                    }
+                    else -> {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        promptMessage = null
+                        onSearch(q, selectedSource)
+                    }
+                }
+            }
+        }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)) {
@@ -301,7 +371,9 @@ internal fun EmptyLaunchState(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { isSearchFocused = it.isFocused },
                     placeholder = {
                         Text(
                             text = "e.g. YouTube, Photos, SponsorBlock...",
@@ -317,12 +389,7 @@ internal fun EmptyLaunchState(
                         imeAction = ImeAction.Search
                     ),
                     keyboardActions = KeyboardActions(
-                        onSearch = {
-                            if (searchQuery.isNotBlank()) {
-                                keyboardController?.hide()
-                                onSearch(searchQuery.trim())
-                            }
-                        }
+                        onSearch = { handleSearchSubmission() }
                     ),
                     leadingIcon = {
                         Icon(
@@ -334,7 +401,13 @@ internal fun EmptyLaunchState(
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(onClick = {
+                                searchQuery = ""
+                                promptMessage = null
+                                suggestions = emptyList()
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                            }) {
                                 Icon(
                                     imageVector = Icons.Outlined.Close,
                                     contentDescription = "Clear",
@@ -344,6 +417,60 @@ internal fun EmptyLaunchState(
                         }
                     }
                 )
+
+                if (promptMessage != null) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = promptMessage!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                if (isCatalogLoading && suggestions.isEmpty() && searchQuery.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Loading app catalog...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
 
                 if (suggestions.isNotEmpty()) {
                     Surface(
@@ -392,7 +519,9 @@ internal fun EmptyLaunchState(
                                             .fillMaxWidth()
                                             .clickable {
                                                 keyboardController?.hide()
-                                                onSearch(app.packageName)
+                                                focusManager.clearFocus()
+                                                promptMessage = null
+                                                onSearch(app.packageName, selectedSource)
                                             }
                                             .padding(horizontal = 12.dp, vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
@@ -442,14 +571,103 @@ internal fun EmptyLaunchState(
                     }
                 }
 
-                HelperButton(
-                    text = "Search APK",
-                    onClick = {
-                        if (searchQuery.isNotBlank()) {
-                            keyboardController?.hide()
-                            onSearch(searchQuery.trim())
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Source Provider",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        item {
+                            val selected = selectedSource == null
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                },
+                                contentColor = if (selected) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                border = BorderStroke(
+                                    width = if (selected) 1.5.dp else 1.dp,
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                ),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { selectedSource = null }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Layers,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "All Sources",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
-                    },
+
+                        items(enabledSources, key = { it.name }) { source ->
+                            val selected = selectedSource == source
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (selected) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                },
+                                contentColor = if (selected) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                border = BorderStroke(
+                                    width = if (selected) 1.5.dp else 1.dp,
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                ),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        selectedSource = if (selectedSource == source) null else source
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    SourceAvatar(source = source, size = 16.dp)
+                                    Text(
+                                        text = source.label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HelperButton(
+                    text = if (selectedSource != null) "Search on ${selectedSource!!.label}" else "Search APK",
+                    onClick = handleSearchSubmission,
                     icon = Icons.Outlined.Search,
                     enabled = searchQuery.isNotBlank(),
                     modifier = Modifier.fillMaxWidth()
@@ -457,22 +675,11 @@ internal fun EmptyLaunchState(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            HelperOutlinedButton(
-                text = "Find New Apps",
-                onClick = onFindApps,
-                icon = Icons.Outlined.Explore,
-                modifier = Modifier.weight(1f)
-            )
-            HelperOutlinedButton(
-                text = "Morphe Manager",
-                onClick = onOpenMorphe,
-                icon = Icons.AutoMirrored.Outlined.OpenInNew,
-                modifier = Modifier.weight(1f)
-            )
-        }
+        HelperOutlinedButton(
+            text = "Find New Apps",
+            onClick = onFindApps,
+            icon = Icons.Outlined.Explore,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }

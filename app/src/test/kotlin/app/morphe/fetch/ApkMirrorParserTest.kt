@@ -19,8 +19,7 @@ class ApkMirrorParserTest {
     private fun parserContext(fetcher: SourceTextFetcher): SourceParserContext =
         SourceParserContext(
             fetcher = fetcher,
-            apkPureApi = FakeApkPureApi(),
-            aptoideApi = FakeAptoideApi()
+            apkPureApi = FakeApkPureApi()
         )
 
     private fun apkMirrorPages(

@@ -111,7 +111,11 @@ internal class ApkPureParser(private val ctx: SourceParserContext) : ApkSourcePa
             null
         }
 
-        return apiLatestCandidates + listOfNotNull(webLatestCandidate)
+        val candidates = apiLatestCandidates + listOfNotNull(webLatestCandidate)
+        if (candidates.isEmpty() && appPageUrl == null) {
+            throw SourceAppNotFoundException(request.packageName)
+        }
+        return candidates
     }
 
     private fun apkPureApiCandidate(
@@ -159,9 +163,29 @@ internal class ApkPureParser(private val ctx: SourceParserContext) : ApkSourcePa
         // The web versions page can be blocked (HTTP 410) for apps whose listing
         // APKPure removed. The update API still serves the exact requested
         // version in that case  fall back to it before giving up.
-        return runCatching { apkPureApiRequestedCandidate(request) }
+        val apiCandidate = runCatching { apkPureApiRequestedCandidate(request) }
             .onFailure { Log.w(TAG, "APKPure requested version API resolve failed", it) }
             .getOrNull()
+        if (apiCandidate != null) return apiCandidate
+
+        if (appPageUrl == null) {
+            val apiHasApp = runCatching {
+                apkPureApi.getAppUpdate(
+                    header = gson.toJson(ApkPureDeviceHeader()),
+                    request = ApkPureUpdateRequest(
+                        app_info_for_update = listOf(
+                            ApkPureAppInfo(package_name = request.packageName, version_code = 0L)
+                        )
+                    )
+                ).app_update_response.any { it.package_name.equals(request.packageName, ignoreCase = true) }
+            }.getOrDefault(false)
+
+            if (!apiHasApp) {
+                throw SourceAppNotFoundException(request.packageName)
+            }
+        }
+
+        return null
     }
 
     private suspend fun apkPureApiRequestedCandidate(request: HelperRequest): DownloadCandidate? {

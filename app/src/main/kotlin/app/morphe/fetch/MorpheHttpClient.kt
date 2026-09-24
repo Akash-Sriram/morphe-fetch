@@ -35,9 +35,17 @@ internal object WebKitCookieJar : CookieJar {
         val cookieManager = runCatching { CookieManager.getInstance() }.getOrNull() ?: return emptyList()
         val rawHeaders = buildList {
             cookieManager.getCookie(url.toString())?.takeIf { it.isNotBlank() }?.let(::add)
-            if (url.host.endsWith("apkmirror.com", ignoreCase = true)) {
-                cookieManager.getCookie("https://www.apkmirror.com/")?.takeIf { it.isNotBlank() }?.let(::add)
-                cookieManager.getCookie("https://apkmirror.com/")?.takeIf { it.isNotBlank() }?.let(::add)
+            val host = url.host.lowercase(Locale.US)
+            val baseDomains = listOf("apkmirror.com", "uptodown.com", "apkcombo.com", "apkpure.com")
+            for (domain in baseDomains) {
+                if (host.endsWith(domain)) {
+                    cookieManager.getCookie("https://www.$domain/")?.takeIf { it.isNotBlank() }?.let(::add)
+                    cookieManager.getCookie("https://$domain/")?.takeIf { it.isNotBlank() }?.let(::add)
+                    if (domain == "uptodown.com") {
+                        cookieManager.getCookie("https://en.uptodown.com/")?.takeIf { it.isNotBlank() }?.let(::add)
+                    }
+                    break
+                }
             }
         }
         if (rawHeaders.isEmpty()) return emptyList()
@@ -162,24 +170,42 @@ internal object MorpheHttpClient {
 
     val baseClient: OkHttpClient by lazy {
         createBaseClientBuilder()
+            .connectionSpecs(listOf(chromeConnectionSpec, ConnectionSpec.CLEARTEXT))
             .addInterceptor { chain ->
                 val req = chain.request()
+                val referer = req.header("Referer")
+                val reqHost = req.url.host
+
+                val fetchSite = when {
+                    referer.isNullOrBlank() -> "none"
+                    runCatching {
+                        val refHost = java.net.URI(referer).host
+                        refHost != null && (refHost == reqHost || refHost.endsWith(reqHost.substringAfter('.')))
+                    }.getOrDefault(false) -> "same-origin"
+                    else -> "cross-site"
+                }
+
                 val reqBuilder = req.newBuilder()
                     .header("User-Agent", browserUserAgent)
-                    .header("Accept-Language", buildAcceptLanguage())
-
-                if (req.header("Accept") == null) {
-                    reqBuilder.header(
+                    .header(
                         "Accept",
-                        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
                     )
+                    .header("Accept-Language", buildAcceptLanguage())
+                    .header("sec-ch-ua", derivedSecChUa(browserUserAgent))
+                    .header("sec-ch-ua-mobile", "?1")
+                    .header("sec-ch-ua-platform", "\"Android\"")
+                    .header("Upgrade-Insecure-Requests", "1")
+                    .header("Sec-Fetch-Site", fetchSite)
+                    .header("Sec-Fetch-Mode", "navigate")
+                    .header("Sec-Fetch-User", "?1")
+                    .header("Sec-Fetch-Dest", "document")
+                    .header("Priority", "u=0, i")
+
+                if (req.header("Cache-Control") == null) {
+                    reqBuilder.header("Cache-Control", "max-age=0")
                 }
-                if (req.header("sec-ch-ua-mobile") == null) {
-                    reqBuilder.header("sec-ch-ua-mobile", "?1")
-                }
-                if (req.header("sec-ch-ua-platform") == null) {
-                    reqBuilder.header("sec-ch-ua-platform", "\"Android\"")
-                }
+
                 chain.proceed(reqBuilder.build())
             }
             .addInterceptor(httpLoggingInterceptor("Default"))

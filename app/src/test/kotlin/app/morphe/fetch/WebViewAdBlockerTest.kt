@@ -50,7 +50,6 @@ class WebViewAdBlockerTest {
             "en.uptodown.com",
             "apkpure.com",
             "apkcombo.com",
-            "aptoide.com",
             "github.com",
             "raw.githubusercontent.com"
         )

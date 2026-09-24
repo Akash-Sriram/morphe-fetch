@@ -1,5 +1,6 @@
 package app.morphe.fetch
 
+import android.annotation.SuppressLint
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import java.util.Locale
 
+@SuppressLint("JavascriptInterface")
 @Composable
 internal fun CaptchaBrowserScreen(
     candidate: DownloadCandidate,
@@ -59,8 +61,14 @@ internal fun CaptchaBrowserScreen(
     var webViewRef: WebView? = null
     val bridge = remember {
         CaptchaCaptureBridge(
-            onUrl = { url ->
+            onUrl = { rawUrl ->
                 Handler(Looper.getMainLooper()).post {
+                    val trimmed = rawUrl.trim()
+                    val url = if (candidate.source == DownloadSource.UPTODOWN && !trimmed.startsWith("http", ignoreCase = true)) {
+                        "https://dw.uptodown.com/dwn/${trimmed.trimStart('/')}"
+                    } else {
+                        trimmed
+                    }
                     val referer = webViewRef?.url ?: webViewRef?.originalUrl ?: candidate.captchaUrl ?: candidate.url
                     CookieManager.getInstance().flush()
                     val cookies = extractCombinedCookies(url, referer)
@@ -144,10 +152,15 @@ internal fun CaptchaBrowserScreen(
                     CookieManager.getInstance().flush()
                     view?.evaluateJavascript(WebViewAdBlocker.INJECT_CSS_JS, null)
                     view?.evaluateJavascript(CAPTCHA_CAPTURE_JS, null)
+                    val preferredAbi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
                     if (candidate.source == DownloadSource.APK_MIRROR) {
-                        val preferredAbi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
                         val targetVersion = candidate.versionName.orEmpty()
                         val autoPilotScript = buildAutoPilotJs(targetVersion, preferredAbi)
+                        view?.postDelayed({
+                            view.evaluateJavascript(autoPilotScript, null)
+                        }, 700)
+                    } else if (candidate.source == DownloadSource.UPTODOWN) {
+                        val autoPilotScript = buildUptodownAutoPilotJs(preferredAbi)
                         view?.postDelayed({
                             view.evaluateJavascript(autoPilotScript, null)
                         }, 700)
@@ -284,7 +297,7 @@ internal fun CaptchaBrowserScreen(
     }
 }
 
-private class CaptchaCaptureBridge(
+internal class CaptchaCaptureBridge(
     private val onUrl: (String) -> Unit,
     private val onLog: (String) -> Unit
 ) {
@@ -308,6 +321,7 @@ private const val CAPTCHA_CAPTURE_JS = """
   function looksLike(u) {
     if (!u) return false;
     try { u = decodeURIComponent(u); } catch (e) {}
+    if (u.indexOf('uptodown-') !== -1 && u.indexOf('.apk') !== -1) return false;
     return re.test(u) || /filename[^.]*\.(apk|apks|apkm|xapk)/i.test(u) || dlPhp.test(u) || /download\.php\?id=\d+/i.test(u);
   }
   
@@ -326,12 +340,18 @@ private const val CAPTCHA_CAPTURE_JS = """
 })();
 """
 
-private fun String.looksLikeApkDownload(): Boolean {
+internal fun String.looksLikeApkDownload(): Boolean {
     val decoded = Uri.decode(this).lowercase(Locale.US)
+    // Never capture Uptodown's store installer stub (e.g. uptodown-com.reddit.frontpage.apk)
+    if (decoded.contains("uptodown-") && decoded.contains(".apk")) {
+        return false
+    }
     return Regex("""\.(apk|apks|apkm|xapk)(\?|#|$)""").containsMatchIn(decoded) ||
         Regex("""filename[^.]*\.(apk|apks|apkm|xapk)""").containsMatchIn(decoded) ||
         Regex("""download\.php\?.*id=\d+""").containsMatchIn(decoded) ||
-        Regex("""download\.php\?id=\d+""").containsMatchIn(decoded)
+        Regex("""download\.php\?id=\d+""").containsMatchIn(decoded) ||
+        contains("dw.uptodown.com", ignoreCase = true) ||
+        contains("dw.uptodown.net", ignoreCase = true)
 }
 
 private fun extractCombinedCookies(url: String, referer: String?): String? {
@@ -341,8 +361,20 @@ private fun extractCombinedCookies(url: String, referer: String?): String? {
         referer?.takeIf { it.isNotBlank() }?.let { ref ->
             cm.getCookie(ref)?.takeIf { it.isNotBlank() }?.let(::add)
         }
-        if (url.contains("apkmirror.com", ignoreCase = true) || referer?.contains("apkmirror.com", ignoreCase = true) == true) {
+        val combined = "$url $referer"
+        if (combined.contains("apkmirror.com", ignoreCase = true)) {
             cm.getCookie("https://www.apkmirror.com/")?.takeIf { it.isNotBlank() }?.let(::add)
+            cm.getCookie("https://apkmirror.com/")?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+        if (combined.contains("uptodown.com", ignoreCase = true)) {
+            cm.getCookie("https://en.uptodown.com/")?.takeIf { it.isNotBlank() }?.let(::add)
+            cm.getCookie("https://uptodown.com/")?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+        if (combined.contains("apkcombo.com", ignoreCase = true)) {
+            cm.getCookie("https://apkcombo.com/")?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+        if (combined.contains("apkpure.com", ignoreCase = true)) {
+            cm.getCookie("https://apkpure.com/")?.takeIf { it.isNotBlank() }?.let(::add)
         }
     }
     if (cookies.isEmpty()) return null
@@ -470,6 +502,81 @@ private fun buildAutoPilotJs(targetVersion: String, preferredAbi: String): Strin
         chosenLink.click();
         return;
       }
+    }
+  } catch (e) {
+    window.Android && window.Android.log && window.Android.log("Auto-pilot error: " + e.message);
+  }
+})();
+    """.trimIndent()
+}
+
+private fun buildUptodownAutoPilotJs(preferredAbi: String): String {
+    val escapedAbi = preferredAbi.replace("\"", "\\\"")
+    return """
+(function () {
+  try {
+    if (document.title.indexOf('Just a moment') !== -1) return;
+
+    var preferredAbi = "$escapedAbi";
+
+    // 1. Detect Turnstile widget and advise user
+    var turnstile = document.querySelector('#download-turnstile-widget, div[data-sitekey]');
+    if (turnstile && !window._turnstileReported) {
+      window._turnstileReported = true;
+      window.Android && window.Android.log && window.Android.log("Verification required — please complete the checkbox if prompted.");
+    }
+
+    // 2. If on a variant list page, pick the matching architecture first
+    var variantRows = document.querySelectorAll('.content .variant, div.variant');
+    if (variantRows && variantRows.length > 0) {
+      var target = null;
+      for (var i = 0; i < variantRows.length; i++) {
+        var rowText = (variantRows[i].textContent || "").toLowerCase();
+        if (preferredAbi && rowText.indexOf(preferredAbi.toLowerCase()) !== -1) {
+          target = variantRows[i].querySelector('a[href], .v-report');
+          break;
+        }
+      }
+      if (!target && variantRows.length > 0) {
+        target = variantRows[0].querySelector('a[href], .v-report');
+      }
+      if (target && !target.getAttribute('data-autopilot-clicked')) {
+        target.setAttribute('data-autopilot-clicked', 'true');
+        window.Android && window.Android.log && window.Android.log("Selected " + preferredAbi + " variant...");
+        target.click();
+        return;
+      }
+    }
+
+    // 3. Poll for the REAL direct download button (ignoring Uptodown store installer)
+    function checkDownload() {
+      var btn = document.querySelector('#detail-download-button, a.button.download[data-url], button#detail-download-button');
+      if (btn) {
+        var dataUrl = btn.getAttribute('data-url');
+        if (dataUrl && dataUrl.length > 5 && dataUrl.indexOf('uptodown-') === -1 && !btn.getAttribute('data-autopilot-clicked')) {
+          if (!dataUrl.startsWith('http')) {
+            dataUrl = 'https://dw.uptodown.com/dwn/' + dataUrl.replace(/^\/+/, '');
+          }
+          btn.setAttribute('data-autopilot-clicked', 'true');
+          window.Android && window.Android.log && window.Android.log("Verified! Starting download...");
+          btn.click();
+          if (window.Android && window.Android.capture) {
+            window.Android.capture(dataUrl);
+          }
+          return true;
+        }
+      }
+      return false;
+    }
+
+    if (!checkDownload()) {
+      var count = 0;
+      var timer = setInterval(function () {
+        count++;
+        if (checkDownload() || count > 30) {
+          clearInterval(timer);
+        }
+      }, 800);
     }
   } catch (e) {
     window.Android && window.Android.log && window.Android.log("Auto-pilot error: " + e.message);

@@ -185,26 +185,6 @@ internal object AppIconResolver {
         }.getOrNull()
     }
 
-    private fun fetchAptoideIcon(packageName: String): Bitmap? {
-        return runCatching {
-            val encodedPkg = java.net.URLEncoder.encode(packageName, "UTF-8")
-            val url = "https://ws75.aptoide.com/api/7/apps/search?query=$encodedPkg&limit=1"
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", MorpheHttpClient.browserUserAgent)
-                .build()
-            val json = httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                response.body.string()
-            }
-            val match = Regex(""""icon"\s*:\s*"([^"]+)"""").find(json)
-            val iconUrl = match?.groupValues?.get(1)?.replace("\\/", "/")
-            if (!iconUrl.isNullOrBlank()) {
-                fetchBitmapFromUrl(iconUrl)
-            } else null
-        }.getOrNull()
-    }
-
     private fun fetchFDroidIcon(packageName: String): Bitmap? {
         return runCatching {
             val url = "https://f-droid.org/en/packages/$packageName/"
@@ -274,16 +254,7 @@ internal object AppIconResolver {
             return@withContext imageBitmap
         }
 
-        // 7. Online Web Resolver: Aptoide
-        val aptoideBitmap = fetchAptoideIcon(packageName)
-        if (aptoideBitmap != null) {
-            saveToDisk(context, packageName, aptoideBitmap)
-            val imageBitmap = aptoideBitmap.asImageBitmap()
-            memoryCache.put(packageName, imageBitmap)
-            return@withContext imageBitmap
-        }
-
-        // 8. Online Web Resolver: F-Droid fallback
+        // 7. Online Web Resolver: F-Droid fallback
         val fdroidBitmap = fetchFDroidIcon(packageName)
         if (fdroidBitmap != null) {
             saveToDisk(context, packageName, fdroidBitmap)

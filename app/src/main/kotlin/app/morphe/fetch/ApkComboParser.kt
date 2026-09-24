@@ -12,10 +12,16 @@ internal class ApkComboParser(private val ctx: SourceParserContext) : ApkSourceP
     override suspend fun findCandidates(
         request: HelperRequest,
         option: CandidateOption
-    ): List<DownloadCandidate> = when (option) {
-        CandidateOption.REQUESTED -> apkComboRequestedCandidates(request)
-        CandidateOption.LATEST -> apkComboLatestCandidates(request)
-        CandidateOption.MANUAL -> emptyList()
+    ): List<DownloadCandidate> {
+        val candidates = when (option) {
+            CandidateOption.REQUESTED -> apkComboRequestedCandidates(request)
+            CandidateOption.LATEST -> apkComboLatestCandidates(request)
+            CandidateOption.MANUAL -> emptyList()
+        }
+        if (candidates.isEmpty() && option != CandidateOption.MANUAL) {
+            throw SourceAppNotFoundException(request.packageName)
+        }
+        return candidates
     }
 
     override fun searchUrl(packageName: String): String? = apkComboSearchUrl(packageName)

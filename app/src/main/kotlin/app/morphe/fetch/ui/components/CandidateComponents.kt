@@ -1,5 +1,6 @@
 package app.morphe.fetch
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,19 +59,15 @@ internal fun CandidateCard(
     val hasResolvedCandidateInfo = candidate.versionName != null ||
         candidate.versionCode != null ||
         !candidate.fileKind.equals("web", ignoreCase = true)
-    var hasOpenedLink by remember(candidate.identityKey()) { mutableStateOf(false) }
-    val linkConsideredOpened = hasOpenedLink || candidate.option == CandidateOption.MANUAL
-    val showUseInstalledApp = candidate.source == DownloadSource.PLAY &&
-        linkConsideredOpened &&
-        remember(candidate.packageName, linkConsideredOpened, installedPackageRefreshToken) {
+    val showUseInstalledApp = candidate.option == CandidateOption.MANUAL &&
+        remember(candidate.packageName, installedPackageRefreshToken) {
             context.isPackageInstalled(candidate.packageName)
         }
 
     val bareLink = candidate.note == null &&
         !hasResolvedCandidateInfo &&
         !candidate.directDownload &&
-        (candidate.option == CandidateOption.MANUAL ||
-            candidate.source == DownloadSource.PLAY)
+        candidate.option == CandidateOption.MANUAL
 
     val body: @Composable ColumnScope.() -> Unit = {
         if (candidate.option != CandidateOption.MANUAL && hasResolvedCandidateInfo) {
@@ -106,38 +103,18 @@ internal fun CandidateCard(
                 )
             }
         } else {
-            if (candidate.source != DownloadSource.PLAY) {
-                if (candidate.captchaUrl != null) {
-                    HelperButton(
-                        text = "Solve captcha in app",
-                        onClick = { onSolveCaptcha(candidate) },
-                        icon = Icons.Outlined.VerifiedUser,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                } else {
-                    HelperButton(
-                        text = "Open in app",
-                        onClick = { onSolveCaptcha(candidate) },
-                        icon = Icons.Outlined.OpenInBrowser,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            } else {
+            if (candidate.captchaUrl != null) {
                 HelperButton(
-                    text = "Open in Play Store",
-                    onClick = {
-                        context.openPlayStoreListing(candidate.packageName, candidate.url)
-                        hasOpenedLink = true
-                    },
-                    icon = Icons.Outlined.OpenInBrowser,
+                    text = "Solve captcha in app",
+                    onClick = { onSolveCaptcha(candidate) },
+                    icon = Icons.Outlined.VerifiedUser,
                     modifier = Modifier.fillMaxWidth()
                 )
-            }
-            if (showUseInstalledApp) {
+            } else {
                 HelperButton(
-                    text = "Use installed app",
-                    onClick = onUseInstalledApp,
-                    icon = Icons.Outlined.CheckCircle,
+                    text = "Open in app",
+                    onClick = { onSolveCaptcha(candidate) },
+                    icon = Icons.Outlined.OpenInBrowser,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -187,6 +164,8 @@ internal fun CandidateInfoChips(request: HelperRequest, candidate: DownloadCandi
         else -> SemanticTone.Error
     }
 
+    val hasSha256 = candidate.files.any { !it.expectedSha256.isNullOrBlank() }
+
     MorpheStatusBadgeRow(modifier = Modifier.fillMaxWidth()) {
         candidate.versionName?.let {
             MorpheStatusBadge(text = "Version $it", tone = versionTone)
@@ -200,8 +179,26 @@ internal fun CandidateInfoChips(request: HelperRequest, candidate: DownloadCandi
         if (!candidate.fileKind.equals("web", ignoreCase = true)) {
             MorpheStatusBadge(text = candidate.fileKind.uppercase(), tone = formatTone)
         }
-        candidate.variantLabel?.let { label ->
-            MorpheStatusBadge(text = label, tone = SemanticTone.Neutral)
+        if (candidate.variantLabel != null) {
+            MorpheStatusBadge(text = candidate.variantLabel, tone = SemanticTone.Neutral)
+        } else when (candidate.source) {
+            DownloadSource.APK_PURE -> {
+                // APKPure API silently selects the device-best APK — make that explicit
+                MorpheStatusBadge(text = "Device-matched", tone = SemanticTone.Neutral)
+            }
+            DownloadSource.UPTODOWN -> {
+                // Single-variant Uptodown APK with no arch label → universal
+                MorpheStatusBadge(text = "Universal", tone = SemanticTone.Neutral)
+            }
+            else -> {}
+        }
+        // SHA-256 trust badge for sources that verify integrity
+        if (hasSha256) {
+            MorpheStatusBadge(text = "SHA-256 ✓", tone = SemanticTone.Success)
+        }
+        // Release date for APKMirror (only source that populates this field)
+        candidate.releaseDate?.takeIf { it.isNotBlank() }?.let { date ->
+            MorpheStatusBadge(text = date, tone = SemanticTone.Neutral)
         }
     }
 }
@@ -500,11 +497,48 @@ internal fun ErrorState(
                     color = MaterialTheme.colorScheme.error
                 )
             }
+            val lines = message.lines().filter(String::isNotBlank)
+            val headline = lines.firstOrNull() ?: message
+            val details = lines.drop(1).filter { it.contains(":") }
+            val hints = lines.drop(1).filter { !it.contains(":") }
+
             Text(
-                text = message,
+                text = headline,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
             )
+
+            if (details.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        details.forEach { detail ->
+                            Text(
+                                text = detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            }
+
+            hints.forEach { hint ->
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             if (candidate != null && onSolveCaptcha != null) {
                 HelperButton(
                     text = "Open in browser (${candidate.source.label})",

@@ -247,12 +247,10 @@ internal data class SourceBrand(
 )
 
 internal fun DownloadSource.brand(): SourceBrand = when (this) {
-    DownloadSource.PLAY -> SourceBrand(resId = R.drawable.ic_src_play)
-    DownloadSource.APK_MIRROR -> SourceBrand(resId = R.drawable.ic_src_apkmirror)
     DownloadSource.APK_PURE -> SourceBrand(resId = R.drawable.ic_src_apkpure)
     DownloadSource.APK_COMBO -> SourceBrand(resId = R.drawable.ic_src_apkcombo)
     DownloadSource.UPTODOWN -> SourceBrand(resId = R.drawable.ic_src_uptodown)
-    DownloadSource.APTOIDE -> SourceBrand(resId = R.drawable.ic_src_aptoide)
+    DownloadSource.APK_MIRROR -> SourceBrand(resId = R.drawable.ic_src_apkmirror)
 }
 
 @Composable
@@ -285,15 +283,13 @@ internal fun RadioDot(selected: Boolean) {
 }
 
 internal val sourceCategories: List<Pair<String, List<DownloadSource>>> = listOf(
-    "Direct mirrors" to listOf(
-        DownloadSource.APK_MIRROR,
-        DownloadSource.UPTODOWN,
+    "Direct downloads" to listOf(
         DownloadSource.APK_PURE,
-        DownloadSource.APK_COMBO,
-        DownloadSource.APTOIDE
+        DownloadSource.APK_COMBO
     ),
-    "Store fallback" to listOf(
-        DownloadSource.PLAY
+    "Archive / Web verification" to listOf(
+        DownloadSource.UPTODOWN,
+        DownloadSource.APK_MIRROR
     )
 )
 

@@ -175,4 +175,25 @@ class UptodownParserTest {
         assertEquals("https://dw.uptodown.com/dwn/xyz-abc", resolved.files[0].url)
         assertEquals(versionPageUrl, resolved.files[0].referer)
     }
+
+    @Test
+    fun findCandidates_unhostedPackageThrowsSourceAppNotFoundException() = runBlocking {
+        val unhostedPkg = "in.startv.hotstar"
+        val unhostedSearchUrl = "https://en.uptodown.com/android/search?query=${URLEncoder.encode(unhostedPkg, "UTF-8")}"
+        val parser = UptodownParser(
+            testParserContext(
+                pages = mapOf(
+                    unhostedSearchUrl to """<html><body><a href="https://other-app.en.uptodown.com/android">Other App</a></body></html>""",
+                    "https://other-app.en.uptodown.com/android/download" to """
+                        <html><body><table><tr><th>Package Name</th><td>com.other.app</td></tr></table></body></html>
+                    """.trimIndent()
+                )
+            )
+        )
+
+        val result = runCatching {
+            parser.findCandidates(testRequest(packageName = unhostedPkg), CandidateOption.LATEST)
+        }
+        assertTrue(result.exceptionOrNull() is SourceAppNotFoundException)
+    }
 }

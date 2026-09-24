@@ -27,9 +27,9 @@ internal fun formatHistoryTimestamp(timestamp: Long): String =
 internal fun fileNameMimeType(fileName: String): String =
     when (fileName.substringAfterLast('.', "").lowercase(Locale.US)) {
         "apk" -> "application/vnd.android.package-archive"
-        "apks",
-        "apkm",
-        "xapk" -> "application/zip"
+        "apkm" -> "application/x-apkm"
+        "apks" -> "application/x-apks"
+        "xapk" -> "application/x-xapk"
         else -> "application/octet-stream"
     }
 
@@ -42,9 +42,9 @@ internal fun Context.isHistoryUriUsable(uriString: String): Boolean {
 
 internal fun File.mimeType(): String = when (extension.lowercase(Locale.US)) {
     "apk" -> "application/vnd.android.package-archive"
-    "apks",
-    "apkm",
-    "xapk" -> "application/zip"
+    "apkm" -> "application/x-apkm"
+    "apks" -> "application/x-apks"
+    "xapk" -> "application/x-xapk"
     else -> "application/octet-stream"
 }
 
@@ -123,14 +123,49 @@ internal fun String.normalizedHttpUrlOrNull(): String? {
 }
 
 
-internal fun Context.readDownloadedApkMetadata(file: File): DownloadedApkMetadata? {
+internal data class DownloadedApkValidation(
+    val metadata: DownloadedApkMetadata,
+    val isBundle: Boolean
+)
+
+internal fun Context.readDownloadedApkMetadata(file: File): DownloadedApkMetadata? =
+    readDownloadedApkMetadataWithBundleCheck(file)?.metadata
+
+internal fun Context.readDownloadedApkMetadataWithBundleCheck(file: File): DownloadedApkValidation? {
+    // 1. If named .apk, attempt direct single-APK parse first
     if (file.extension.equals("apk", ignoreCase = true)) {
-        return readApkMetadata(file)
+        val direct = readApkMetadata(file)
+        if (direct != null) {
+            return DownloadedApkValidation(direct, isBundle = false)
+        }
     }
 
-    return runCatching {
+    // 2. Try parsing as a ZIP bundle (XAPK, APKS, APKM)
+    val fromZip = runCatching {
         val validationDir = File(cacheDir, "validation").apply { mkdirs() }
         ZipFile(file).use { zip ->
+            // Check for XAPK manifest.json first
+            val manifestEntry = zip.getEntry("manifest.json")
+            if (manifestEntry != null) {
+                val manifestMetadata = runCatching {
+                    val text = zip.getInputStream(manifestEntry).bufferedReader().use { it.readText() }
+                    val json = org.json.JSONObject(text)
+                    val packageName = json.optString("package_name").takeIf { it.isNotBlank() } ?: return@runCatching null
+                    val versionName = json.optString("version_name").takeIf { it.isNotBlank() }
+                    val versionCode = json.optLong("version_code", -1L).takeIf { it > 0L }
+                        ?: json.optString("version_code").toLongOrNull()
+                    DownloadedApkMetadata(
+                        packageName = packageName,
+                        versionName = versionName,
+                        versionCode = versionCode
+                    )
+                }.getOrNull()
+                if (manifestMetadata != null) {
+                    return@use DownloadedApkValidation(manifestMetadata, isBundle = true)
+                }
+            }
+
+            // Extract and inspect inner APK entries
             val packageHint = file.nameWithoutExtension
                 .substringBefore('-')
                 .lowercase(Locale.US)
@@ -151,6 +186,7 @@ internal fun Context.readDownloadedApkMetadata(file: File): DownloadedApkMetadat
                         .thenBy { it.name }
                 )
                 .toList()
+
             var metadata: DownloadedApkMetadata? = null
             for (entry in apkEntries) {
                 val extracted = File(
@@ -167,9 +203,21 @@ internal fun Context.readDownloadedApkMetadata(file: File): DownloadedApkMetadat
                     break
                 }
             }
-            metadata
+            metadata?.let { DownloadedApkValidation(it, isBundle = true) }
         }
     }.getOrNull()
+
+    if (fromZip != null) return fromZip
+
+    // 3. Fallback: if extension was not .apk, still try direct readApkMetadata just in case
+    if (!file.extension.equals("apk", ignoreCase = true)) {
+        val fallback = readApkMetadata(file)
+        if (fallback != null) {
+            return DownloadedApkValidation(fallback, isBundle = false)
+        }
+    }
+
+    return null
 }
 
 @Suppress("DEPRECATION")

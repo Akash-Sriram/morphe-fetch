@@ -159,4 +159,21 @@ class ApkPureParserTest {
         assertEquals("apk", candidate.fileKind)
         assertTrue(candidate.url.startsWith("https://download.apkpure.com/"))
     }
+
+    @Test
+    fun findCandidates_unhostedPackageThrowsSourceAppNotFoundException() = runBlocking {
+        val unhostedPkg = "in.startv.hotstar"
+        val api = FakeApkPureApi(response = ApkPureUpdateResponse(app_update_response = emptyList()))
+        val parser = ApkPureParser(
+            testParserContext(
+                pages = emptyMap(),
+                apkPureApi = api
+            )
+        )
+
+        val result = runCatching {
+            parser.findCandidates(testRequest(packageName = unhostedPkg), CandidateOption.LATEST)
+        }
+        assertTrue(result.exceptionOrNull() is SourceAppNotFoundException)
+    }
 }

@@ -173,21 +173,15 @@ internal data class HelperRequest(
 
     fun sourceHintUrlsFor(source: DownloadSource): List<String> {
         val domain = when (source) {
-            DownloadSource.PLAY -> "play.google.com"
-            DownloadSource.APK_MIRROR -> "apkmirror.com"
-            DownloadSource.APK_COMBO -> "apkcombo.com"
-            DownloadSource.APTOIDE -> "aptoide.com"
             DownloadSource.APK_PURE -> "apkpure.com"
+            DownloadSource.APK_COMBO -> "apkcombo.com"
             DownloadSource.UPTODOWN -> "uptodown.com"
+            DownloadSource.APK_MIRROR -> "apkmirror.com"
         }
 
         return (sourceHintUrls + fallbackWebUrl).distinct().filter { url ->
             val host = runCatching { Uri.parse(url).host?.lowercase(Locale.US) }.getOrNull().orEmpty()
-            if (host.contains("google.") && source != DownloadSource.PLAY) {
-                false
-            } else {
-                host == domain || host.endsWith(".$domain")
-            }
+            host == domain || host.endsWith(".$domain")
         }
     }
 
@@ -233,7 +227,7 @@ internal data class HelperRequest(
                     .orEmpty(),
                 requestedFileType = intent.getStringExtra(DownloadHelperContract.EXTRA_FILE_TYPE)
                     ?: intent.getStringExtra(DownloadHelperContract.EXTRA_REQUESTED_FILE_TYPE),
-                allowSplitArchive = intent.getBooleanExtra(DownloadHelperContract.EXTRA_ALLOW_SPLIT_ARCHIVE, false),
+                allowSplitArchive = intent.getBooleanExtra(DownloadHelperContract.EXTRA_ALLOW_SPLIT_ARCHIVE, true),
                 stockInstallRequired = intent.getBooleanExtra(
                     DownloadHelperContract.EXTRA_STOCK_INSTALL_REQUIRED,
                     intent.getBooleanExtra(DownloadHelperContract.EXTRA_INSTALL_STOCK_AFTER_DOWNLOAD, false)
@@ -253,21 +247,17 @@ internal enum class DownloadSource(
     val sortIndex: Int,
     val supportsManualArtifactPicker: Boolean = true
 ) {
-    APK_MIRROR("APKMirror", 0),
-    UPTODOWN("Uptodown", 1),
-    APK_PURE("APKPure", 2),
-    APK_COMBO("APKCombo", 3),
-    APTOIDE("Aptoide", 4),
-    PLAY("Play", 5, supportsManualArtifactPicker = false)
+    APK_PURE("APKPure", 0),
+    APK_COMBO("APKCombo", 1),
+    UPTODOWN("Uptodown", 2),
+    APK_MIRROR("APKMirror", 3)
 }
 
 internal fun DownloadSource.searchDomain(): String? = when (this) {
-    DownloadSource.APK_MIRROR -> null // uses apkMirrorBrowserSearchUrl instead of Google search
-    DownloadSource.UPTODOWN -> "uptodown.com"
     DownloadSource.APK_PURE -> "apkpure.com"
     DownloadSource.APK_COMBO -> "apkcombo.com"
-    DownloadSource.APTOIDE -> "aptoide.com"
-    DownloadSource.PLAY -> "play.google.com"
+    DownloadSource.UPTODOWN -> "uptodown.com"
+    DownloadSource.APK_MIRROR -> null // uses apkMirrorBrowserSearchUrl instead of Google search
 }
 
 internal enum class CandidateOption {

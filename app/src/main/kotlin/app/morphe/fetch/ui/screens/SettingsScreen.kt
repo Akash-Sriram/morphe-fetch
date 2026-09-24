@@ -94,6 +94,217 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 
+private enum class SettingsSection(
+    val title: String,
+    val icon: ImageVector
+) {
+    PREFERENCES("Preferences", Icons.Outlined.Tune),
+    SOURCES("Download Sources", Icons.Outlined.Dns),
+    HISTORY("Download History", Icons.Outlined.History),
+    LOGS("Activity Logs", Icons.Outlined.BugReport),
+    UPDATES("Updates & About", Icons.Outlined.Download)
+}
+
+@Composable
+internal fun DownloadSourcesContent(
+    settings: HelperSettings,
+    onSettingsChange: (HelperSettings) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val enabledSources = remember(settings.disabledSources) {
+        DownloadSource.entries.filter { it !in settings.disabledSources }
+    }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Quick Action Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                modifier = Modifier.clickable {
+                    onSettingsChange(
+                        settings.copy(
+                            disabledSources = emptySet()
+                        )
+                    )
+                }
+            ) {
+                Text(
+                    text = "Enable All",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (settings.preferredSource == null) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                },
+                modifier = Modifier.clickable {
+                    onSettingsChange(settings.copy(preferredSource = null))
+                }
+            ) {
+                Text(
+                    text = if (settings.preferredSource == null) "Default: Auto (First)" else "Reset to Auto",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (settings.preferredSource == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+
+        // Source list
+        DownloadSource.entries.forEach { source ->
+            val isEnabled = source !in settings.disabledSources
+            val isPreferred = settings.preferredSource == source
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = when {
+                    isPreferred -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                    isEnabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)
+                },
+                border = if (isPreferred) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)) else null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (isEnabled) {
+                            val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
+                            if (enabledCount > 1) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        disabledSources = settings.disabledSources + source,
+                                        preferredSource = if (isPreferred) null else settings.preferredSource
+                                    )
+                                )
+                            }
+                        } else {
+                            onSettingsChange(
+                                settings.copy(
+                                    disabledSources = settings.disabledSources - source
+                                )
+                            )
+                        }
+                    }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SourceAvatar(source = source, size = 30.dp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = source.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isEnabled) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isPreferred) {
+                                Text(
+                                    text = "★ Default Preferred",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else if (isEnabled) {
+                                Text(
+                                    text = "Set Default",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.clickable {
+                                        onSettingsChange(settings.copy(preferredSource = source))
+                                    }
+                                )
+                                Text(
+                                    text = "•",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Text(
+                                    text = "Only this",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.clickable {
+                                        val allOthers = DownloadSource.entries.filter { it != source }.toSet()
+                                        onSettingsChange(
+                                            settings.copy(
+                                                disabledSources = allOthers,
+                                                preferredSource = source
+                                            )
+                                        )
+                                    }
+                                )
+                            } else {
+                                Text(
+                                    text = "Disabled",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                            }
+                        }
+                    }
+                    Switch(
+                        checked = isEnabled,
+                        onCheckedChange = { checked ->
+                            if (!checked) {
+                                val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
+                                if (enabledCount > 1) {
+                                    onSettingsChange(
+                                        settings.copy(
+                                            disabledSources = settings.disabledSources + source,
+                                            preferredSource = if (isPreferred) null else settings.preferredSource
+                                        )
+                                    )
+                                }
+                            } else {
+                                onSettingsChange(
+                                    settings.copy(
+                                        disabledSources = settings.disabledSources - source
+                                    )
+                                )
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.surface,
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                            uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = "At least one source must remain active.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
+    }
+}
+
 @Composable
 internal fun HelperSettingsScreen(
     settings: HelperSettings,
@@ -111,6 +322,8 @@ internal fun HelperSettingsScreen(
     onDismissUpdate: () -> Unit = {},
     onBack: () -> Unit
 ) {
+    val isExpanded = isExpandedScreen()
+    var selectedSection by rememberSaveable { mutableStateOf(SettingsSection.PREFERENCES) }
     val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
     val context = LocalContext.current
     var cacheBytes by remember(context) { mutableStateOf(context.temporaryDownloadsSize()) }
@@ -126,7 +339,7 @@ internal fun HelperSettingsScreen(
         DownloadSource.entries.filter { it !in settings.disabledSources }
     }
 
-    if (sourcesDialog) {
+    if (!isExpanded && sourcesDialog) {
         AlertDialog(
             onDismissRequest = { sourcesDialog = false },
             confirmButton = {
@@ -143,203 +356,21 @@ internal fun HelperSettingsScreen(
                 }
             },
             text = {
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 440.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    // Quick Action Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            modifier = Modifier.clickable {
-                                onSettingsChange(
-                                    settings.copy(
-                                        disabledSources = emptySet()
-                                    )
-                                )
-                            }
-                        ) {
-                            Text(
-                                text = "Enable All",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (settings.preferredSource == null) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            },
-                            modifier = Modifier.clickable {
-                                onSettingsChange(settings.copy(preferredSource = null))
-                            }
-                        ) {
-                            Text(
-                                text = if (settings.preferredSource == null) "Default: Auto (First)" else "Reset to Auto",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (settings.preferredSource == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-
-                    // Source list
-                    DownloadSource.entries.forEach { source ->
-                        val isEnabled = source !in settings.disabledSources
-                        val isPreferred = settings.preferredSource == source
-
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = when {
-                                isPreferred -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                                isEnabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)
-                            },
-                            border = if (isPreferred) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)) else null,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (isEnabled) {
-                                        val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
-                                        if (enabledCount > 1) {
-                                            onSettingsChange(
-                                                settings.copy(
-                                                    disabledSources = settings.disabledSources + source,
-                                                    preferredSource = if (isPreferred) null else settings.preferredSource
-                                                )
-                                            )
-                                        }
-                                    } else {
-                                        onSettingsChange(
-                                            settings.copy(
-                                                disabledSources = settings.disabledSources - source
-                                            )
-                                        )
-                                    }
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                SourceAvatar(source = source, size = 30.dp)
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = source.label,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (isEnabled) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                    )
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        if (isPreferred) {
-                                            Text(
-                                                text = "★ Default Preferred",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        } else if (isEnabled) {
-                                            Text(
-                                                text = "Set Default",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.clickable {
-                                                    onSettingsChange(settings.copy(preferredSource = source))
-                                                }
-                                            )
-                                            Text(
-                                                text = "•",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.outline
-                                            )
-                                            Text(
-                                                text = "Only this",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.secondary,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.clickable {
-                                                    val allOthers = DownloadSource.entries.filter { it != source }.toSet()
-                                                    onSettingsChange(
-                                                        settings.copy(
-                                                            disabledSources = allOthers,
-                                                            preferredSource = source
-                                                        )
-                                                    )
-                                                }
-                                            )
-                                        } else {
-                                            Text(
-                                                text = "Disabled",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                            )
-                                        }
-                                    }
-                                }
-                                Switch(
-                                    checked = isEnabled,
-                                    onCheckedChange = { checked ->
-                                        if (!checked) {
-                                            val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
-                                            if (enabledCount > 1) {
-                                                onSettingsChange(
-                                                    settings.copy(
-                                                        disabledSources = settings.disabledSources + source,
-                                                        preferredSource = if (isPreferred) null else settings.preferredSource
-                                                    )
-                                                )
-                                            }
-                                        } else {
-                                            onSettingsChange(
-                                                settings.copy(
-                                                    disabledSources = settings.disabledSources - source
-                                                )
-                                            )
-                                        }
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = MaterialTheme.colorScheme.surface,
-                                        checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                        uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                                    )
-                                )
-                            }
-                        }
-                    }
-
-                    Text(
-                        text = "At least one source must remain active.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    DownloadSourcesContent(
+                        settings = settings,
+                        onSettingsChange = onSettingsChange
                     )
                 }
             }
         )
     }
-
-    if (historyDialog) {
+    if (!isExpanded && historyDialog) {
         AlertDialog(
             onDismissRequest = { historyDialog = false },
             confirmButton = {
@@ -361,7 +392,7 @@ internal fun HelperSettingsScreen(
         )
     }
 
-    if (logsDialog) {
+    if (!isExpanded && logsDialog) {
         AlertDialog(
             onDismissRequest = { logsDialog = false },
             confirmButton = {
@@ -415,242 +446,597 @@ internal fun HelperSettingsScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .verticalScroll(scrollState)
-            .padding(horizontal = MorpheDefaults.ContentPadding, vertical = MorpheDefaults.ContentPadding)
-            .pointerInput(swipeThresholdPx) {
-                var totalDrag = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { totalDrag = 0f },
-                    onHorizontalDrag = { _, dragAmount ->
-                        totalDrag += dragAmount
-                    },
-                    onDragEnd = {
-                        if (totalDrag >= swipeThresholdPx) onBack()
-                    },
-                    onDragCancel = { totalDrag = 0f }
-                )
-            },
-        verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
-    ) {
-        // Top Header: Title and Close button (NO BACK ARROW)
+    if (isExpanded) {
+        // Adaptive Two-Pane Master-Detail Tablet Layout
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(MorpheDefaults.ContentPadding),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "Settings",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            HelperHeaderIconButton(
-                icon = Icons.Outlined.Close,
-                contentDescription = "Close",
-                onClick = onBack
-            )
-        }
-
-        // STYLE 1: Top 2x2 Primary Operational Grid
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Tile 1: Download Sources
-            PrimaryMetricTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.Dns,
-                title = "Download Sources",
-                status = "${enabledSources.size} of ${DownloadSource.entries.size} Active",
-                badge = settings.preferredSource?.label ?: "Auto",
-                onClick = { sourcesDialog = true }
-            )
-
-            // Tile 2: Cache Storage with Clean Action
-            CacheMetricTile(
-                modifier = Modifier.weight(1f),
-                cacheBytes = cacheBytes + downloadsBytes,
-                onClean = {
-                    context.clearTemporaryDownloads()
-                    context.clearDownloadsCopies()
-                    cacheBytes = 0L
-                    downloadsBytes = 0L
-                }
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Tile 3: Download History
-            PrimaryMetricTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.History,
-                title = "Download History",
-                status = "${historyEntries.size} APKs",
-                badge = "View",
-                onClick = { historyDialog = true }
-            )
-
-            // Tile 4: Activity Logs
-            PrimaryMetricTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.BugReport,
-                title = "Activity Logs",
-                status = "${logs.size} Events",
-                badge = "View",
-                onClick = { logsDialog = true }
-            )
-        }
-
-        // STYLE 2: Bottom 2x2 Control Grid
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Tile 5: Save Location
-            ControlClickableTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.FolderOpen,
-                title = "Save Location",
-                subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
-                onClick = { locationDialog = true }
-            )
-
-            // Tile 6: Network Policy
-            ControlClickableTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.Wifi,
-                title = "Network Policy",
-                subtitle = if (settings.networkPolicy == NetworkPolicy.WIFI_AND_MOBILE) "Wi-Fi & Data" else "Unmetered",
-                onClick = { policyDialog = true }
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Tile 7: Auto-download Best Match with direct Switch
-            ControlSwitchTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.AutoAwesome,
-                title = "Auto-fetch",
-                subtitle = "Morphe zero-click",
-                checked = settings.autoDownloadBestMatch,
-                onCheckedChange = {
-                    onSettingsChange(settings.copy(autoDownloadBestMatch = it))
-                }
-            )
-
-            // Tile 8: Auto-clear Handoff with direct Switch
-            ControlSwitchTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.CleaningServices,
-                title = "Auto-clear",
-                subtitle = "Purge temp APKs",
-                checked = settings.deleteTemporaryAfterHandoff,
-                onCheckedChange = {
-                    onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = it))
-                }
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Tile 9: Log to Logcat with direct Switch
-            ControlSwitchTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.Bolt,
-                title = "Log to Logcat",
-                subtitle = "Stream to ADB",
-                checked = settings.logcatLogging,
-                onCheckedChange = {
-                    onSettingsChange(settings.copy(logcatLogging = it))
-                }
-            )
-
-            // Tile 10: Check Updates Tile
-            ControlClickableTile(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Outlined.Download,
-                title = "Check Updates",
-                subtitle = when (updateState) {
-                    is UpdateState.Checking -> "Checking..."
-                    is UpdateState.Available -> "${updateState.info.tagName} Available!"
-                    is UpdateState.UpToDate -> "Latest (v${BuildConfig.VERSION_NAME})"
-                    is UpdateState.Downloading -> "Downloading..."
-                    is UpdateState.ReadyToInstall -> "Ready to install"
-                    is UpdateState.Error -> "Check failed"
-                    is UpdateState.Idle -> "v${BuildConfig.VERSION_NAME}"
-                },
-                onClick = onCheckForUpdates
-            )
-        }
-
-        // Bottom Inline 3-Theme Selector
-        Surface(
-            shape = RoundedCornerShape(MorpheDefaults.CompactCornerRadius),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
+            // Left Master Navigation Pane
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(5.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .width(MorpheDefaults.MasterPaneWidth)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
             ) {
-                val themeOptions = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
-                themeOptions.forEach { mode ->
-                    val isSelected = settings.themeMode == mode
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent,
-                        border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)) else null,
-                        onClick = { onSettingsChange(settings.copy(themeMode = mode)) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically
+                // Header: Title, version and Close
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Settings",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Morphe Fetch v${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    HelperHeaderIconButton(
+                        icon = Icons.Outlined.Close,
+                        contentDescription = "Close",
+                        onClick = onBack
+                    )
+                }
+
+                // Navigation Category Items
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SettingsSection.entries.forEach { section ->
+                        val isSelected = selectedSection == section
+                        SurfaceCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = 12.dp,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+                            },
+                            borderWidth = if (isSelected) 1.dp else 0.dp,
+                            borderColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else Color.Transparent,
+                            onClick = { selectedSection = section }
                         ) {
-                            Icon(
-                                imageVector = mode.icon(),
-                                contentDescription = null,
-                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(17.dp)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = section.icon,
+                                        contentDescription = null,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = section.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    val subtitle = when (section) {
+                                        SettingsSection.PREFERENCES -> "Theme, cache & network"
+                                        SettingsSection.SOURCES -> "${enabledSources.size} of ${DownloadSource.entries.size} active"
+                                        SettingsSection.HISTORY -> "${historyEntries.size} APKs"
+                                        SettingsSection.LOGS -> "${logs.size} Events"
+                                        SettingsSection.UPDATES -> when (updateState) {
+                                            is UpdateState.Available -> "Update available!"
+                                            is UpdateState.Checking -> "Checking..."
+                                            else -> "v${BuildConfig.VERSION_NAME}"
+                                        }
+                                    }
+                                    Text(
+                                        text = subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (section == SettingsSection.UPDATES && updateState is UpdateState.Available) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                // Trailing badge
+                                when (section) {
+                                    SettingsSection.SOURCES -> {
+                                        MorpheStatusBadge(
+                                            text = settings.preferredSource?.label ?: "Auto",
+                                            tone = SemanticTone.Primary
+                                        )
+                                    }
+                                    SettingsSection.UPDATES -> {
+                                        if (updateState is UpdateState.Available) {
+                                            MorpheStatusBadge(
+                                                text = "New",
+                                                tone = SemanticTone.Primary
+                                            )
+                                        }
+                                    }
+                                    else -> Unit
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom Quick Cache Cleanup Tile
+                CacheMetricTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    cacheBytes = cacheBytes + downloadsBytes,
+                    onClean = {
+                        context.clearTemporaryDownloads()
+                        context.clearDownloadsCopies()
+                        cacheBytes = 0L
+                        downloadsBytes = 0L
+                    }
+                )
+            }
+
+            // Vertical Divider
+            MorpheVerticalDivider(
+                modifier = Modifier.fillMaxHeight().padding(vertical = 4.dp)
+            )
+
+            // Right Detail Pane
+            SurfaceCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                cornerRadius = 16.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(MorpheDefaults.ContentPaddingMedium),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    when (selectedSection) {
+                        SettingsSection.PREFERENCES -> {
+                            SettingsPreferencesDetail(
+                                settings = settings,
+                                onSettingsChange = onSettingsChange,
+                                cacheBytes = cacheBytes + downloadsBytes,
+                                onCleanCache = {
+                                    context.clearTemporaryDownloads()
+                                    context.clearDownloadsCopies()
+                                    cacheBytes = 0L
+                                    downloadsBytes = 0L
+                                },
+                                onOpenLocationDialog = { locationDialog = true },
+                                onOpenPolicyDialog = { policyDialog = true }
                             )
-                            Text(
-                                text = mode.title,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        SettingsSection.SOURCES -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = "Download Sources",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Manage repositories and mirrors queried during APK searches. Star a source to set it as preferred.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                DownloadSourcesContent(
+                                    settings = settings,
+                                    onSettingsChange = onSettingsChange
+                                )
+                            }
+                        }
+                        SettingsSection.HISTORY -> {
+                            DownloadHistorySection(
+                                entries = historyEntries,
+                                onClear = onClearHistory,
+                                onOpen = onOpenHistoryEntry,
+                                onShare = onShareHistoryEntry
+                            )
+                        }
+                        SettingsSection.LOGS -> {
+                            RequestLogsCard(
+                                logs = logs,
+                                onClearLogs = onClearLogs
+                            )
+                        }
+                        SettingsSection.UPDATES -> {
+                            UpdatesCard(
+                                updateState = updateState,
+                                onCheckForUpdates = onCheckForUpdates,
+                                onDownloadUpdate = onDownloadUpdate,
+                                onInstallUpdate = onInstallUpdate,
+                                onDismissUpdate = onDismissUpdate
                             )
                         }
                     }
                 }
             }
         }
+    } else {
+        // Single-Column Phone Layout with swipe-to-dismiss
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .widthIn(max = MorpheDefaults.MaxContentWidth)
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = MorpheDefaults.ContentPadding, vertical = MorpheDefaults.ContentPadding)
+                    .pointerInput(swipeThresholdPx) {
+                        var totalDrag = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { totalDrag = 0f },
+                            onHorizontalDrag = { _, dragAmount ->
+                                totalDrag += dragAmount
+                            },
+                            onDragEnd = {
+                                if (totalDrag >= swipeThresholdPx) onBack()
+                            },
+                            onDragCancel = { totalDrag = 0f }
+                        )
+                    },
+                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+            ) {
+                // Top Header: Title and Close button (NO BACK ARROW)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Settings",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    HelperHeaderIconButton(
+                        icon = Icons.Outlined.Close,
+                        contentDescription = "Close",
+                        onClick = onBack
+                    )
+                }
 
-        // Updates Card
-        UpdatesCard(
-            updateState = updateState,
-            onCheckForUpdates = onCheckForUpdates,
-            onDownloadUpdate = onDownloadUpdate,
-            onInstallUpdate = onInstallUpdate,
-            onDismissUpdate = onDismissUpdate
-        )
+                // Theme Mode Selector at the Top (Appearance)
+                Surface(
+                    shape = RoundedCornerShape(MorpheDefaults.CompactCornerRadius),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val themeOptions = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
+                        themeOptions.forEach { mode ->
+                            val isSelected = settings.themeMode == mode
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent,
+                                border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)) else null,
+                                onClick = { onSettingsChange(settings.copy(themeMode = mode)) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = mode.icon(),
+                                        contentDescription = null,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                    Text(
+                                        text = mode.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // STYLE 1: Top 2x2 Primary Operational Grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    PrimaryMetricTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.Dns,
+                        title = "Download Sources",
+                        status = "${enabledSources.size} of ${DownloadSource.entries.size} Active",
+                        badge = settings.preferredSource?.label ?: "Auto",
+                        onClick = { sourcesDialog = true }
+                    )
+
+                    CacheMetricTile(
+                        modifier = Modifier.weight(1f),
+                        cacheBytes = cacheBytes + downloadsBytes,
+                        onClean = {
+                            context.clearTemporaryDownloads()
+                            context.clearDownloadsCopies()
+                            cacheBytes = 0L
+                            downloadsBytes = 0L
+                        }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    PrimaryMetricTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.History,
+                        title = "Download History",
+                        status = "${historyEntries.size} APKs",
+                        badge = "View",
+                        onClick = { historyDialog = true }
+                    )
+
+                    PrimaryMetricTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.BugReport,
+                        title = "Activity Logs",
+                        status = "${logs.size} Events",
+                        badge = "View",
+                        onClick = { logsDialog = true }
+                    )
+                }
+
+                // STYLE 2: Bottom 2x2 Control Grid
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ControlClickableTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.FolderOpen,
+                        title = "Save Location",
+                        subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
+                        onClick = { locationDialog = true }
+                    )
+
+                    ControlClickableTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.Wifi,
+                        title = "Network Policy",
+                        subtitle = if (settings.networkPolicy == NetworkPolicy.WIFI_AND_MOBILE) "Wi-Fi & Data" else "Unmetered",
+                        onClick = { policyDialog = true }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ControlSwitchTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.AutoAwesome,
+                        title = "Auto-fetch",
+                        subtitle = "Morphe zero-click",
+                        checked = settings.autoDownloadBestMatch,
+                        onCheckedChange = {
+                            onSettingsChange(settings.copy(autoDownloadBestMatch = it))
+                        }
+                    )
+
+                    ControlSwitchTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.CleaningServices,
+                        title = "Auto-clear",
+                        subtitle = "Purge temp APKs",
+                        checked = settings.deleteTemporaryAfterHandoff,
+                        onCheckedChange = {
+                            onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = it))
+                        }
+                    )
+                }
+
+                ControlSwitchTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = Icons.Outlined.Bolt,
+                    title = "Log to Logcat",
+                    subtitle = "Stream diagnostic logs to ADB",
+                    checked = settings.logcatLogging,
+                    onCheckedChange = {
+                        onSettingsChange(settings.copy(logcatLogging = it))
+                    }
+                )
+
+                // Updates Card
+                UpdatesCard(
+                    updateState = updateState,
+                    onCheckForUpdates = onCheckForUpdates,
+                    onDownloadUpdate = onDownloadUpdate,
+                    onInstallUpdate = onInstallUpdate,
+                    onDismissUpdate = onDismissUpdate
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsPreferencesDetail(
+    settings: HelperSettings,
+    onSettingsChange: (HelperSettings) -> Unit,
+    cacheBytes: Long,
+    onCleanCache: () -> Unit,
+    onOpenLocationDialog: () -> Unit,
+    onOpenPolicyDialog: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        // Section 1: Appearance
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Appearance",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Surface(
+                shape = RoundedCornerShape(MorpheDefaults.CompactCornerRadius),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val themeOptions = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
+                    themeOptions.forEach { mode ->
+                        val isSelected = settings.themeMode == mode
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent,
+                            border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)) else null,
+                            onClick = { onSettingsChange(settings.copy(themeMode = mode)) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = mode.icon(),
+                                    contentDescription = null,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = mode.title,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 2: Storage & Connection
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Storage & Connection",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ControlClickableTile(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Outlined.FolderOpen,
+                    title = "Save Location",
+                    subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
+                    onClick = onOpenLocationDialog
+                )
+                ControlClickableTile(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Outlined.Wifi,
+                    title = "Network Policy",
+                    subtitle = if (settings.networkPolicy == NetworkPolicy.WIFI_AND_MOBILE) "Wi-Fi & Data" else "Unmetered",
+                    onClick = onOpenPolicyDialog
+                )
+            }
+        }
+
+        // Section 3: Automation & Diagnostics
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Automation & Diagnostics",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ControlSwitchTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = Icons.Outlined.AutoAwesome,
+                    title = "Auto-fetch",
+                    subtitle = "Automatically download best matching candidate for Morphe without extra prompt",
+                    checked = settings.autoDownloadBestMatch,
+                    onCheckedChange = {
+                        onSettingsChange(settings.copy(autoDownloadBestMatch = it))
+                    }
+                )
+
+                ControlSwitchTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = Icons.Outlined.CleaningServices,
+                    title = "Auto-clear handoff",
+                    subtitle = "Purge temporary APK hand-off files after delivery to Morphe",
+                    checked = settings.deleteTemporaryAfterHandoff,
+                    onCheckedChange = {
+                        onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = it))
+                    }
+                )
+
+                ControlSwitchTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = Icons.Outlined.Bolt,
+                    title = "Log to Logcat",
+                    subtitle = "Stream detailed Morphe Fetch diagnostic events to Android Logcat / ADB",
+                    checked = settings.logcatLogging,
+                    onCheckedChange = {
+                        onSettingsChange(settings.copy(logcatLogging = it))
+                    }
+                )
+            }
+        }
     }
 }
 

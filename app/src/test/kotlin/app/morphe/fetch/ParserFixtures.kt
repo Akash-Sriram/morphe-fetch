@@ -25,38 +25,13 @@ internal class FakeApkPureApi(
     ): ApkPureUpdateResponse = response
 }
 
-internal class FakeAptoideApi(
-    var appByPackage: AptoideApp = AptoideApp(),
-    var searchResults: List<AptoideApp> = emptyList(),
-    var appById: AptoideApp = AptoideApp()
-) : AptoideApi {
-    override suspend fun searchApps(request: AptoideSearchRequest): AptoideSearchResponse =
-        AptoideSearchResponse(datalist = AptoideDataList(list = searchResults))
-
-    override suspend fun getAppByPackage(packageName: String): AptoideGetAppResponse =
-        AptoideGetAppResponse(nodes = AptoideNodes(meta = AptoideMetaNode(data = appByPackage)))
-
-    override suspend fun getAppById(appId: Long): AptoideGetAppResponse =
-        AptoideGetAppResponse(nodes = AptoideNodes(meta = AptoideMetaNode(data = appById)))
-
-    override suspend fun listAppVersionsByPackage(
-        packageName: String,
-        limit: Long
-    ): AptoideVersionListResponse = AptoideVersionListResponse()
-
-    override suspend fun listAppVersionsById(appId: Long, limit: Long): AptoideVersionListResponse =
-        AptoideVersionListResponse()
-}
-
 internal fun testParserContext(
     pages: Map<String, String>,
     rateLimitedUrls: Set<String> = emptySet(),
-    apkPureApi: ApkPureApi = FakeApkPureApi(),
-    aptoideApi: AptoideApi = FakeAptoideApi()
+    apkPureApi: ApkPureApi = FakeApkPureApi()
 ): SourceParserContext = SourceParserContext(
     fetcher = FakeSourceTextFetcher(pages, rateLimitedUrls),
-    apkPureApi = apkPureApi,
-    aptoideApi = aptoideApi
+    apkPureApi = apkPureApi
 )
 
 internal fun testRequest(

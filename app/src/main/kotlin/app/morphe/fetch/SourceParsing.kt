@@ -68,8 +68,12 @@ internal class OkHttpSourceTextFetcher(
     }
 
     private fun gapMillisFor(url: String): Long {
-        val host = runCatching { java.net.URI(url).host }?.getOrNull() ?: return minRequestGapMillis
-        return hostGapsMillis[host.lowercase(Locale.US)] ?: minRequestGapMillis
+        val host = runCatching { java.net.URI(url).host }.getOrNull()?.lowercase(Locale.US) ?: return minRequestGapMillis
+        hostGapsMillis[host]?.let { return it }
+        for ((domain, gap) in hostGapsMillis) {
+            if (host.endsWith(".$domain") || host == domain) return gap
+        }
+        return minRequestGapMillis
     }
 
     /** Enforce a minimum gap between request starts so fetches never burst. */
@@ -90,13 +94,12 @@ internal class OkHttpSourceTextFetcher(
 }
 
 /**
- * Everything a per-source parser needs. `apkPureApi`/`aptoideApi` are non-null
- * so parsers can call them directly.
+ * Everything a per-source parser needs. `apkPureApi` is non-null
+ * so parsers can call it directly.
  */
 internal class SourceParserContext(
     val fetcher: SourceTextFetcher,
-    val apkPureApi: ApkPureApi,
-    val aptoideApi: AptoideApi
+    val apkPureApi: ApkPureApi
 ) {
     fun document(url: String, referer: String? = null): Document =
         Jsoup.parse(fetcher.fetchText(url, referer), url)

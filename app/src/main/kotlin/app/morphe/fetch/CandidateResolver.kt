@@ -90,7 +90,7 @@ internal class CandidateResolver(
         source: DownloadSource,
         candidates: List<DownloadCandidate>
     ): List<DownloadCandidate> {
-        if (!request.hasRequestedVersionRequest || source == DownloadSource.PLAY) {
+        if (!request.hasRequestedVersionRequest) {
             return emptyList()
         }
 
@@ -113,10 +113,6 @@ internal class CandidateResolver(
         candidates: List<DownloadCandidate>,
         effectiveDisabledSources: Set<DownloadSource>
     ): List<DownloadCandidate> {
-        if (source == DownloadSource.PLAY) {
-            return listOf(playStoreCandidate(request))
-        }
-
         return buildList {
             addAll(
                 candidates
@@ -125,9 +121,6 @@ internal class CandidateResolver(
             )
             if (none { it.option == CandidateOption.LATEST }) {
                 parsers[source]?.latestFallbackCandidate(request)?.let(::add)
-            }
-            if (none { it.option == CandidateOption.LATEST }) {
-                latestWebFallback(request, source, effectiveDisabledSources)?.let(::add)
             }
         }
             .distinctBy(DownloadCandidate::identityKey)
@@ -241,20 +234,6 @@ internal class CandidateResolver(
                 parser.searchUrl(request.packageName, request.appName)?.let { parser.source to it }
             }
             .sortedBy { it.first.ordinal }
-
-    fun playStoreCandidate(request: HelperRequest) = DownloadCandidate(
-        source = DownloadSource.PLAY,
-        name = request.appName,
-        packageName = request.packageName,
-        versionName = null,
-        versionCode = null,
-        url = playStoreUrl(request.packageName),
-        fileKind = "web",
-        option = CandidateOption.LATEST,
-        directDownload = false,
-        versionStatus = VersionStatus.LATEST,
-        formatMatches = true
-    )
 }
 
 private fun DownloadCandidate.archPriority(availableAbis: List<String>): Int {

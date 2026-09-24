@@ -14,15 +14,11 @@ private const val MAX_DOWNLOAD_ATTEMPTS = 3
 private const val DOWNLOAD_RETRY_BASE_MS = 2_000L
 private const val HTTP_PARTIAL_CONTENT = 206
 
-/**
- * Streaming download engine with partial-range resume and automatic retries.
- *
- * Downloads are staged into `target` (usually a `.part` file): if the target
- * already holds bytes, the transfer resumes from that offset with a Range
- * request when the server supports it. Transient failures (network I/O,
- * HTTP 408/429/5xx) retry up to [MAX_DOWNLOAD_ATTEMPTS] times with
- * exponential backoff, reporting each retry through [onRetry].
- */
+internal data class DownloadResult(
+    val finalUrl: String,
+    val contentDisposition: String?
+)
+
 internal class ApkDownloader(
     private val client: OkHttpClient,
     private val apkPureClient: OkHttpClient,
@@ -39,12 +35,11 @@ internal class ApkDownloader(
         download: CandidateDownloadFile,
         target: File,
         onProgress: (copied: Long, total: Long) -> Unit
-    ) {
+    ): DownloadResult {
         var attempt = 0
         while (true) {
             try {
-                performDownloadAttempt(download, target, onProgress)
-                return
+                return performDownloadAttempt(download, target, onProgress)
             } catch (error: Throwable) {
                 if (error is CancellationException || error.message == "Canceled") throw error
                 if (attempt >= MAX_DOWNLOAD_ATTEMPTS - 1 || !isTransientDownloadError(error)) throw error
@@ -60,7 +55,7 @@ internal class ApkDownloader(
         download: CandidateDownloadFile,
         target: File,
         onProgress: (copied: Long, total: Long) -> Unit
-    ) {
+    ): DownloadResult {
         val url = download.url.normalizedHttpUrlOrNull()
             ?: error("Source returned an invalid download URL.".withManualModeHint())
         val partial = if (target.exists()) target.length() else 0L
@@ -74,6 +69,8 @@ internal class ApkDownloader(
         try {
             call.execute().use { response ->
                 check(response.isSuccessful) { "HTTP ${response.code}" }
+                val finalUrl = response.request.url.toString()
+                val contentDisposition = response.header("Content-Disposition")
                 val resumed = response.code == HTTP_PARTIAL_CONTENT && partial > 0L
                 val total: Long = if (resumed) {
                     partial + response.body.contentLength().coerceAtLeast(0L)
@@ -99,6 +96,7 @@ internal class ApkDownloader(
                         }
                     }
                 }
+                return DownloadResult(finalUrl, contentDisposition)
             }
         } finally {
             if (activeCall === call) activeCall = null

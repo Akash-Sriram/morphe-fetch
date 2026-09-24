@@ -37,7 +37,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Storefront
@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -189,14 +190,26 @@ internal fun AppBrowserRow(
     app: ArchiveApp,
     favourite: Boolean,
     installed: Boolean = false,
+    selected: Boolean = false,
     onToggleFavourite: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val cardColor = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+    } else {
+        MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
+    }
+    val borderWidth = if (selected) 1.5.dp else 0.dp
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+
     SurfaceCard(
         modifier = modifier,
         onClick = onClick,
-        cornerRadius = 14.dp
+        cornerRadius = 14.dp,
+        color = cardColor,
+        borderWidth = borderWidth,
+        borderColor = borderColor
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -410,25 +423,12 @@ internal fun AppDetailView(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (onGetApk != null) {
-                            HelperButton(
-                                text = "Get APK",
-                                icon = Icons.Outlined.Download,
-                                onClick = { onGetApk(app.packageName, app.name) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        HelperOutlinedButton(
-                            text = "Play Store",
-                            icon = Icons.Outlined.Storefront,
-                            onClick = {
-                                context.openPlayStoreListing(app.packageName, playStoreUrl(app.packageName))
-                            },
-                            modifier = Modifier.weight(1f)
+                    if (onGetApk != null) {
+                        HelperButton(
+                            text = "Get APK",
+                            icon = Icons.Outlined.Download,
+                            onClick = { onGetApk(app.packageName, app.name) },
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
@@ -551,7 +551,7 @@ internal fun AppSourceCard(
                 source.webUrl?.takeIf { it.isNotBlank() }?.let { webUrl ->
                     MorphePillButton(
                         onClick = { onOpenUrl(webUrl) },
-                        icon = Icons.Outlined.OpenInNew,
+                        icon = Icons.AutoMirrored.Outlined.OpenInNew,
                         contentDescription = "Open repo",
                         label = "Open repo",
                         modifier = Modifier.weight(1f)
