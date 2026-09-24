@@ -2,6 +2,7 @@ package app.morphe.fetch
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -40,8 +41,15 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.finishEvents.collect { resultIntent ->
-                    setResult(Activity.RESULT_OK, resultIntent)
-                    finish()
+                    if (callingActivity != null) {
+                        setResult(Activity.RESULT_OK, resultIntent)
+                        finish()
+                    } else {
+                        val uri = resultIntent.data
+                        if (uri != null) {
+                            sendApkToMorphe(uri, resultIntent.getStringExtra(DownloadHelperContract.EXTRA_RESULT_FILE_NAME))
+                        }
+                    }
                 }
             }
         }
@@ -79,6 +87,7 @@ class MainActivity : ComponentActivity() {
                         onCancel = { finish() },
                         onCancelDownload = viewModel::cancelDownload,
                         onOpenMorphe = ::openMorpheManager,
+                        onSendApkToMorphe = { entry -> sendApkToMorphe(Uri.parse(entry.uri), entry.fileName) },
                         onSolveCaptcha = viewModel::openCaptchaBrowser,
                         onRequestFileTypeChange = viewModel::changeRequestedFileType,
                         onSearchPackage = viewModel::searchPackage,
@@ -121,6 +130,29 @@ class MainActivity : ComponentActivity() {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             viewModel.downloadAndReturn(candidate)
+        }
+    }
+
+    private fun sendApkToMorphe(uri: Uri, fileName: String? = null) {
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = fileName?.let { fileNameMimeType(it) } ?: "application/vnd.android.package-archive"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = ClipData.newUri(contentResolver, fileName ?: "app.apk", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val managerPackage = MORPHE_MANAGER_PACKAGES.firstOrNull { pkg ->
+            packageManager.getLaunchIntentForPackage(pkg) != null
+        }
+        if (managerPackage != null) {
+            sendIntent.setPackage(managerPackage)
+            viewModel.appendLog("Sending APK to Morphe Manager ($managerPackage).")
+            runCatching { startActivity(sendIntent) }
+                .onFailure {
+                    startActivity(Intent.createChooser(sendIntent, "Send to Morphe"))
+                }
+        } else {
+            runCatching { startActivity(Intent.createChooser(sendIntent, "Send to Morphe")) }
+                .onFailure { openMorpheManager() }
         }
     }
 

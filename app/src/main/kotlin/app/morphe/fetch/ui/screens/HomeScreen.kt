@@ -90,6 +90,7 @@ internal fun HelperScreen(
     onCancel: () -> Unit,
     onCancelDownload: () -> Unit,
     onOpenMorphe: () -> Unit,
+    onSendApkToMorphe: (DownloadHistoryEntry) -> Unit = {},
     onSolveCaptcha: (DownloadCandidate) -> Unit,
     onRequestFileTypeChange: (String) -> Unit,
     onSearchPackage: (String) -> Unit,
@@ -232,6 +233,9 @@ internal fun HelperScreen(
                                             }
                                             context.startActivity(installIntent)
                                         }
+                                    },
+                                    onSendToMorphe = {
+                                        onSendApkToMorphe(entry)
                                     },
                                     onShare = {
                                         runCatching {
@@ -522,6 +526,7 @@ internal fun CachedAppCard(
     entry: DownloadHistoryEntry,
     onInstall: () -> Unit,
     onShare: () -> Unit,
+    onSendToMorphe: () -> Unit,
     onSearchAgain: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier
@@ -600,11 +605,11 @@ internal fun CachedAppCard(
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (usable) {
+            if (usable) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     HelperButton(
                         text = "Install",
                         icon = Icons.Outlined.InstallMobile,
@@ -612,19 +617,30 @@ internal fun CachedAppCard(
                         modifier = Modifier.weight(1f)
                     )
                     HelperOutlinedButton(
-                        text = "Share",
-                        icon = Icons.Outlined.Share,
-                        onClick = onShare,
-                        modifier = Modifier.weight(1f)
-                    )
-                } else {
-                    HelperOutlinedButton(
-                        text = "Search again",
-                        icon = Icons.Outlined.Download,
-                        onClick = onSearchAgain,
+                        text = "Send to Morphe",
+                        icon = Icons.Outlined.Build,
+                        onClick = onSendToMorphe,
                         modifier = Modifier.weight(1f)
                     )
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    HelperOutlinedButton(
+                        text = "Share",
+                        icon = Icons.Outlined.Share,
+                        onClick = onShare,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            } else {
+                HelperOutlinedButton(
+                    text = "Search again",
+                    icon = Icons.Outlined.Download,
+                    onClick = onSearchAgain,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }

@@ -236,8 +236,12 @@ class ApkMirrorParserTest {
 
     @Test
     fun findCandidates_requested_noResultsMarkerSkipsCandidateFetches() = runBlocking {
+        val directSearchUrl =
+            "https://www.apkmirror.com/?post_type=app_release&searchtype=apk&s=Example+App+1.0.4"
         val fetcher = FakeSourceTextFetcher(
             pages = mapOf(
+                directSearchUrl to
+                    """<html><body><p>No results found matching your query</p></body></html>""",
                 searchUrl to
                     """<html><body><p>No results found matching your query</p></body></html>"""
             )
@@ -252,7 +256,7 @@ class ApkMirrorParserTest {
         val result = runCatching { parser.findCandidates(request, CandidateOption.REQUESTED) }
 
         assertTrue(result.exceptionOrNull() is SourceAppNotFoundException)
-        assertEquals(listOf(searchUrl), fetcher.requestedUrls())
+        assertEquals(listOf(directSearchUrl, searchUrl), fetcher.requestedUrls())
     }
 
     @Test

@@ -707,6 +707,23 @@ internal fun Context.scheduleTemporaryDelete(file: File) {
 
 internal fun Context.copyToDownloads(file: File): Uri {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // Remove any prior file with the exact same name in Morphe Fetch downloads directory
+        runCatching {
+            val projection = arrayOf(MediaStore.Downloads._ID)
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ? AND ${MediaStore.Downloads.RELATIVE_PATH} LIKE ?"
+            val selectionArgs = arrayOf(file.name, "${Environment.DIRECTORY_DOWNLOADS}/Morphe Fetch%")
+            contentResolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, projection, selection, selectionArgs, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(MediaStore.Downloads._ID)
+                if (idCol >= 0) {
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val itemUri = android.content.ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+                        contentResolver.delete(itemUri, null, null)
+                    }
+                }
+            }
+        }
+
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, file.name)
             put(MediaStore.Downloads.MIME_TYPE, file.mimeType())
@@ -734,8 +751,8 @@ internal fun Context.copyToDownloads(file: File): Uri {
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "Morphe Fetch"
         ).apply { mkdirs() }
-        val output = downloadsDir.uniqueChild(file.name)
-        file.copyTo(output, overwrite = false)
+        val output = File(downloadsDir, file.name)
+        file.copyTo(output, overwrite = true)
         FileProvider.getUriForFile(this, "${BuildConfig.APPLICATION_ID}.files", output)
     }
 }

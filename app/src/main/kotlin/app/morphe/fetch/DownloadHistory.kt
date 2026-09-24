@@ -38,7 +38,26 @@ internal object DownloadHistoryStore {
     }
 
     fun add(context: Context, entry: DownloadHistoryEntry) {
-        val updated = (listOf(entry) + entries(context)).take(MAX_ENTRIES)
+        val currentEntries = entries(context)
+        // Partition out any duplicate with the same package and version (or exact same file name)
+        val (duplicates, remaining) = currentEntries.partition {
+            it.packageName == entry.packageName && (
+                (!it.versionName.isNullOrBlank() && it.versionName == entry.versionName) ||
+                it.fileName == entry.fileName
+            )
+        }
+        // Delete old duplicate files to save storage space
+        duplicates.forEach { old ->
+            runCatching {
+                val oldUri = Uri.parse(old.uri)
+                if (old.uri.startsWith("content://")) {
+                    context.contentResolver.delete(oldUri, null, null)
+                } else {
+                    File(oldUri.path ?: return@runCatching).delete()
+                }
+            }
+        }
+        val updated = (listOf(entry) + remaining).take(MAX_ENTRIES)
         context.getSharedPreferences(PREFS_HISTORY, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_ENTRIES, gson.toJson(updated))
@@ -47,6 +66,14 @@ internal object DownloadHistoryStore {
     }
 
     fun remove(context: Context, entry: DownloadHistoryEntry) {
+        runCatching {
+            val uri = Uri.parse(entry.uri)
+            if (entry.uri.startsWith("content://")) {
+                context.contentResolver.delete(uri, null, null)
+            } else {
+                File(uri.path ?: return@runCatching).delete()
+            }
+        }
         val updated = entries(context).filterNot {
             it.fileName == entry.fileName && it.timestamp == entry.timestamp
         }
@@ -58,6 +85,16 @@ internal object DownloadHistoryStore {
     }
 
     fun clear(context: Context) {
+        entries(context).forEach { entry ->
+            runCatching {
+                val uri = Uri.parse(entry.uri)
+                if (entry.uri.startsWith("content://")) {
+                    context.contentResolver.delete(uri, null, null)
+                } else {
+                    File(uri.path ?: return@runCatching).delete()
+                }
+            }
+        }
         context.getSharedPreferences(PREFS_HISTORY, Context.MODE_PRIVATE).edit().clear().apply()
         _updates.tryEmit(Unit)
     }
