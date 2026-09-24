@@ -1,26 +1,31 @@
 # Morphe Fetch
 
-The native Android companion for [Morphe Manager](https://github.com/MorpheApp) to resolve and download APKs directly on device with zero friction.
+Fast, native Android companion downloader for [Morphe Manager](https://github.com/MorpheApp) and standalone APK retriever.
+
+A hard fork of [`helper-for-morphe`](https://github.com/rushiranpise/helper-for-morphe) by [Rushi Ranpise](https://github.com/rushiranpise), maintained and evolved by [Akash Sriram](https://github.com/Akash-Sriram).
 
 ---
 
-### Core Architecture & Capabilities
+### Features
 
-- **Native Browser Emulation & War Mode** — Device-authentic Chrome User-Agent headers, Chromium TLS cipher suite ordering, full Client Hints (`sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`), and structured fetch metadata (`Sec-Fetch-*`).
-- **Headless Cloudflare Session Warming** — Background WebView pre-warms sessions and automatically intercepts HTTP 403 / verification challenges, passing verified cookies and sessions to native download workers with zero user prompts.
-- **Dynamic Source Resolvers** — High-speed direct resolution across APKMirror, Uptodown, APKPure, APKCombo, Aptoide, and Google Play fallback.
-- **Zero-Lag Search** — Debounced asynchronous querying and virtualized lazy list rendering on the home screen.
-- **Comprehensive Version History** — Formatted release dates and release suffix badges (Secondary, Beta, Alpha, Wear OS, Android TV) distinguishing primary vs. secondary variants.
-- **Smart ABI Architecture Selection** — Automatically prioritizes native CPU ABI matches (e.g. `arm64-v8a`) to eliminate incompatible installs.
-- **Morphe Manager Intent Integration** — Seamlessly satisfies Morphe Manager download contracts with APK verification and handoff.
-- **Real-Time Download Indicators** — Live downloaded / total size indicators with instant visual feedback.
+- **Multi-Source Parallel Resolution** — Concurrently queries all sources and prioritizes direct APK links.
+- **Headless Cloudflare Solver** — Background Turnstile solver and session warmer for zero-prompt downloads.
+- **Strict Package Verification** — Enforces exact package IDs to eliminate unhosted fallbacks and broken links.
+- **Universal Format Support** — Full support for `APK`, `APKM`, `APKS`, and `XAPK` with root manifest parsing.
+- **Morphe Manager Integration** — Seamless automated package resolution and installation handoff via intents.
+- **Fluid Search & Navigation** — Instant offline catalog search, architecture filters, and search-first back navigation.
 
 ---
 
 ### Supported Sources
 
-APKMirror · Uptodown · APKPure · APKCombo · Aptoide · Google Play *(fallback)*
+- **APKMirror** — Direct variants, release dates, and automated session keeper.
+- **APKPure** — Version update API with device-matched architectures.
+- **APKCombo** — Direct API and variant streams.
+- **Uptodown** — CDN downloads with automated background Turnstile bypass.
 
-- Per-source toggles and configurable default provider
-- Integrated WebView challenge solver and automated background session keeper
-- Standalone search or Morphe Manager zero-click auto-fetch mode
+---
+
+### License
+
+Licensed under the [GPL-3.0 License](LICENSE).
