@@ -13,6 +13,7 @@ import app.morphe.fetch.aurora.MicroGAccountTokenProvider
 import app.morphe.fetch.aurora.GPlayHttpClient
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -59,6 +60,7 @@ import androidx.compose.material.icons.outlined.SdStorage
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material.icons.outlined.Smartphone
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.Tune
@@ -126,241 +128,278 @@ internal fun DownloadSourcesContent(
     val enabledSources = remember(settings.disabledSources) {
         DownloadSource.entries.filter { it !in settings.disabledSources }
     }
+    var showAuroraAccountDialog by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Quick Action Row
+        // Quick Action Row: Sleek Compact Pills
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val allEnabled = settings.disabledSources.isEmpty()
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                modifier = Modifier.clickable {
-                    onSettingsChange(
-                        settings.copy(
-                            disabledSources = emptySet()
-                        )
-                    )
+                shape = MorpheDefaults.PillShape,
+                color = if (allEnabled) {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                } else {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                },
+                border = BorderStroke(
+                    1.dp,
+                    if (allEnabled) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                ),
+                onClick = {
+                    onSettingsChange(settings.copy(disabledSources = emptySet()))
                 }
             ) {
-                Text(
-                    text = "Enable All",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.CheckCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp),
+                        tint = if (allEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Enable All",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (allEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
+            val isAuto = settings.preferredSource == null
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (settings.preferredSource == null) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                } else {
+                shape = MorpheDefaults.PillShape,
+                color = if (isAuto) {
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                } else {
+                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f)
                 },
-                modifier = Modifier.clickable {
+                border = BorderStroke(
+                    1.dp,
+                    if (isAuto) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    else MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f)
+                ),
+                onClick = {
                     onSettingsChange(settings.copy(preferredSource = null))
                 }
             ) {
-                Text(
-                    text = if (settings.preferredSource == null) "Default: Auto (First)" else "Reset to Auto",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (settings.preferredSource == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp),
+                        tint = if (isAuto) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.secondary
+                    )
+                    Text(
+                        text = if (isAuto) "Auto Mode" else "Reset to Auto",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isAuto) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.secondary
+                    )
+                }
             }
         }
 
-        var showAuroraAccountDialog by remember { mutableStateOf(false) }
+        // Unified Sources Container Card
+        SectionCard(modifier = Modifier.fillMaxWidth()) {
+            Column {
+                DownloadSource.entries.forEachIndexed { index, source ->
+                    val isEnabled = source !in settings.disabledSources
+                    val isPreferred = settings.preferredSource == source
 
-        // Source list
-        DownloadSource.entries.forEach { source ->
-            val isEnabled = source !in settings.disabledSources
-            val isPreferred = settings.preferredSource == source
-
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = when {
-                    isPreferred -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                    isEnabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                    else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)
-                },
-                border = if (isPreferred) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)) else null,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // Per-source: compact 2-line layout (+ Aurora account row)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (isPreferred) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                else Modifier
+                            )
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        SourceAvatar(source = source, size = 30.dp)
+                        // Line 1: Avatar + Name + Default badge + Toggle (all on one row)
                         Row(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            SourceAvatar(source = source, size = 24.dp)
                             Text(
                                 text = source.label,
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = if (isEnabled) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                color = if (isEnabled) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                modifier = Modifier.weight(1f)
                             )
                             if (isPreferred) {
-                                Text(
-                                    text = "★ Default",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
+                                MorpheStatusBadge(
+                                    text = "Default",
+                                    tone = SemanticTone.Primary
                                 )
-                            } else if (!isEnabled) {
+                            }
+                            Switch(
+                                checked = isEnabled,
+                                onCheckedChange = { checked ->
+                                    if (!checked) {
+                                        val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
+                                        if (enabledCount > 1) {
+                                            onSettingsChange(
+                                                settings.copy(
+                                                    disabledSources = settings.disabledSources + source,
+                                                    preferredSource = if (isPreferred) null else settings.preferredSource
+                                                )
+                                            )
+                                        }
+                                    } else {
+                                        onSettingsChange(
+                                            settings.copy(
+                                                disabledSources = settings.disabledSources - source
+                                            )
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.scale(0.80f),
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.surface,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            )
+                        }
+
+                        // Line 2: Set Default • Solo inline text links
+                        if (!isEnabled) {
+                            Text(
+                                text = "Disabled",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.padding(start = 32.dp)
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.padding(start = 32.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (!isPreferred) {
+                                    Text(
+                                        text = "Set Default",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.clickable {
+                                            onSettingsChange(settings.copy(preferredSource = source))
+                                        }
+                                    )
+                                    Text(
+                                        text = "·",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Preferred",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                    Text(
+                                        text = "·",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+                                }
                                 Text(
-                                    text = "(Disabled)",
+                                    text = "Solo",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.clickable {
+                                        val allOthers = DownloadSource.entries.filter { it != source }.toSet()
+                                        onSettingsChange(
+                                            settings.copy(
+                                                disabledSources = allOthers,
+                                                preferredSource = source
+                                            )
+                                        )
+                                    }
                                 )
                             }
                         }
 
-                        Switch(
-                            checked = isEnabled,
-                            onCheckedChange = { checked ->
-                                if (!checked) {
-                                    val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
-                                    if (enabledCount > 1) {
-                                        onSettingsChange(
-                                            settings.copy(
-                                                disabledSources = settings.disabledSources + source,
-                                                preferredSource = if (isPreferred) null else settings.preferredSource
-                                            )
-                                        )
-                                    }
-                                } else {
-                                    onSettingsChange(
-                                        settings.copy(
-                                            disabledSources = settings.disabledSources - source
-                                        )
-                                    )
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colorScheme.surface,
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
-                        )
-                    }
-
-                    if (source == DownloadSource.AURORA && isEnabled) {
-                        val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
-                        val accountText = when {
-                            !settings.auroraEmail.isNullOrBlank() -> settings.auroraEmail
-                            hasAccount -> "Custom token session"
-                            else -> "Anonymous session"
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (hasAccount) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                            },
-                            border = BorderStroke(
-                                1.dp,
-                                if (hasAccount) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
-                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-                            ),
-                            onClick = { showAuroraAccountDialog = true },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
+                        // Line 3 (Aurora only): email + settings icon — no profile icon
+                        if (source == DownloadSource.AURORA && isEnabled) {
+                            val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
+                            val accountText = when {
+                                !settings.auroraEmail.isNullOrBlank() -> settings.auroraEmail!!
+                                hasAccount -> "Custom token"
+                                else -> "Anonymous session"
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(5.dp),
+                                color = if (hasAccount) MaterialTheme.colorScheme.primary.copy(alpha = 0.09f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                                border = BorderStroke(
+                                    0.5.dp,
+                                    if (hasAccount) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f)
+                                ),
+                                onClick = { showAuroraAccountDialog = true },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .padding(start = 32.dp)
                             ) {
-                                Text(
-                                    text = accountText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
                                 Row(
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
                                     Text(
-                                        text = if (hasAccount) "Account" else "Configure",
+                                        text = accountText,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
                                     )
                                     Icon(
                                         imageVector = Icons.Outlined.Tune,
                                         contentDescription = "Configure account",
-                                        tint = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(15.dp)
+                                        tint = if (hasAccount) MaterialTheme.colorScheme.primary.copy(alpha = 0.75f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(12.dp)
                                     )
                                 }
                             }
                         }
                     }
 
-
-                    if (isEnabled) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 40.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (!isPreferred) {
-                                Text(
-                                    text = "Set Default",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.clickable {
-                                        onSettingsChange(settings.copy(preferredSource = source))
-                                    }
-                                )
-                                Text(
-                                    text = "•",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                )
-                            }
-                            Text(
-                                text = "Only this",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.secondary,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.clickable {
-                                    val allOthers = DownloadSource.entries.filter { it != source }.toSet()
-                                    onSettingsChange(
-                                        settings.copy(
-                                            disabledSources = allOthers,
-                                            preferredSource = source
-                                        )
-                                    )
-                                }
-                            )
-                        }
+                    if (index < DownloadSource.entries.size - 1) {
+                        MorpheDivider(fullWidth = true)
                     }
                 }
             }
@@ -782,24 +821,58 @@ internal fun HelperSettingsScreen(
     if (!isExpanded && sourcesDialog) {
         AlertDialog(
             onDismissRequest = { sourcesDialog = false },
-            confirmButton = {
-                HelperButton(text = "Done", onClick = { sourcesDialog = false })
-            },
+            confirmButton = {},
+            shape = RoundedCornerShape(MorpheDefaults.SectionCornerRadius),
+            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
             title = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Download Sources", fontWeight = FontWeight.Bold)
-                    Text(
-                        text = "${enabledSources.size} of ${DownloadSource.entries.size} active • Tap to toggle or customize",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Dns,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                    ) {
+                        Text("Download Sources", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "${enabledSources.size} of ${DownloadSource.entries.size} active",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = { sourcesDialog = false },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Close",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             },
             text = {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 440.dp)
+                        .heightIn(max = 520.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
                     DownloadSourcesContent(
