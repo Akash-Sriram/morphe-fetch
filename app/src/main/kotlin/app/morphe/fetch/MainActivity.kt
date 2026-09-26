@@ -40,6 +40,13 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        if (savedInstanceState == null) {
+            viewModel.checkForUpdates(context = this, notifySystem = true)
+        }
+        if (intent.getBooleanExtra("EXTRA_OPEN_UPDATE", false)) {
+            viewModel.showUpdateDialog()
+        }
+
         viewModel.handleIntent(intent)
 
         lifecycleScope.launch {
@@ -97,7 +104,7 @@ class MainActivity : ComponentActivity() {
                         onClearRequest = viewModel::clearRequest,
                         onDeliverPendingResult = viewModel::deliverPendingResult,
                         updateState = viewModel.updateState,
-                        onCheckForUpdates = { viewModel.checkForUpdates() },
+                        onCheckForUpdates = { viewModel.checkForUpdates(context = this) },
                         onDownloadUpdate = { info -> viewModel.downloadUpdate(this, info) },
                         onInstallUpdate = { file -> viewModel.installUpdate(this, file) },
                         onDismissUpdate = viewModel::resetUpdateState
@@ -110,6 +117,20 @@ class MainActivity : ComponentActivity() {
                             onDownloadNew = viewModel::dismissReuseOffer
                         )
                     }
+
+                    val showUpdateModal = !viewModel.updateDialogDismissed && (
+                        viewModel.updateState is app.morphe.fetch.updater.UpdateState.Available ||
+                        viewModel.updateState is app.morphe.fetch.updater.UpdateState.Downloading ||
+                        viewModel.updateState is app.morphe.fetch.updater.UpdateState.ReadyToInstall
+                    )
+                    if (showUpdateModal) {
+                        AppUpdateDialog(
+                            updateState = viewModel.updateState,
+                            onDownloadUpdate = { info -> viewModel.downloadUpdate(this, info) },
+                            onInstallUpdate = { file -> viewModel.installUpdate(this, file) },
+                            onDismiss = viewModel::dismissUpdateDialog
+                        )
+                    }
                 }
             }
         }
@@ -120,6 +141,9 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (viewModel.deliverPendingResultIfPresent(this)) {
             return
+        }
+        if (intent.getBooleanExtra("EXTRA_OPEN_UPDATE", false)) {
+            viewModel.showUpdateDialog()
         }
         viewModel.handleIntent(intent)
     }

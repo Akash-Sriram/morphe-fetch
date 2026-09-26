@@ -7,6 +7,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Warning
+import app.morphe.fetch.updater.UpdateInfo
+import app.morphe.fetch.updater.UpdateState
+import java.io.File
+import java.util.Locale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -521,5 +531,214 @@ internal fun LoadingState() {
         CircularProgressIndicator()
     }
 }
+
+@Composable
+internal fun AppUpdateDialog(
+    updateState: UpdateState,
+    onDownloadUpdate: (UpdateInfo) -> Unit,
+    onInstallUpdate: (File) -> Unit,
+    onDismiss: () -> Unit
+) {
+    when (updateState) {
+        is UpdateState.Available -> {
+            val info = updateState.info
+            val sizeMb = if (info.apkSize > 0) {
+                "%.1f MB".format(Locale.US, info.apkSize / (1024f * 1024f))
+            } else ""
+
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Download,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                },
+                title = {
+                    Text(
+                        text = "Update Available",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Morphe Fetch ${info.tagName}",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            if (sizeMb.isNotEmpty()) {
+                                Text(
+                                    text = sizeMb,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Current: v${BuildConfig.VERSION_NAME} → Latest: ${info.tagName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (!info.changelog.isNullOrBlank()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 180.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(10.dp)
+                                ) {
+                                    Text(
+                                        text = info.changelog.trim(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    HelperButton(
+                        text = "Update Now",
+                        onClick = { onDownloadUpdate(info) },
+                        icon = Icons.Outlined.Download
+                    )
+                },
+                dismissButton = {
+                    HelperOutlinedButton(
+                        text = "Later",
+                        onClick = onDismiss
+                    )
+                }
+            )
+        }
+        is UpdateState.Downloading -> {
+            val progress = updateState.progress
+            val copiedMb = "%.1f".format(Locale.US, updateState.downloadedBytes / (1024f * 1024f))
+            val totalMb = "%.1f".format(Locale.US, updateState.totalBytes / (1024f * 1024f))
+            AlertDialog(
+                onDismissRequest = { /* Keep active during download */ },
+                title = {
+                    Text(
+                        text = "Downloading Update...",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "${updateState.info.tagName} • $copiedMb of $totalMb MB (${(progress * 100).toInt()}%)",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                        )
+                    }
+                },
+                confirmButton = {}
+            )
+        }
+        is UpdateState.ReadyToInstall -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Outlined.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                },
+                title = {
+                    Text(
+                        text = "Update Ready",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        text = "${updateState.info.tagName} has been downloaded and is ready to install.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                },
+                confirmButton = {
+                    HelperButton(
+                        text = "Install Now",
+                        onClick = { onInstallUpdate(updateState.apkFile) },
+                        icon = Icons.Outlined.Download
+                    )
+                },
+                dismissButton = {
+                    HelperOutlinedButton(
+                        text = "Later",
+                        onClick = onDismiss
+                    )
+                }
+            )
+        }
+        is UpdateState.Error -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(32.dp)
+                    )
+                },
+                title = {
+                    Text(
+                        text = "Update Failed",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        text = updateState.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                },
+                confirmButton = {
+                    HelperButton(
+                        text = "Dismiss",
+                        onClick = onDismiss
+                    )
+                }
+            )
+        }
+        else -> {}
+    }
+}
+
 
 

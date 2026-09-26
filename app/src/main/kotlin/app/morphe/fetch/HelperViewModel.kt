@@ -954,12 +954,30 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    fun checkForUpdates(currentVersion: String = BuildConfig.VERSION_NAME) {
+    var updateDialogDismissed by mutableStateOf(false)
+        private set
+
+    fun dismissUpdateDialog() {
+        updateDialogDismissed = true
+    }
+
+    fun showUpdateDialog() {
+        updateDialogDismissed = false
+    }
+
+    fun checkForUpdates(
+        currentVersion: String = BuildConfig.VERSION_NAME,
+        notifySystem: Boolean = false,
+        context: Context? = null
+    ) {
         updateState = UpdateState.Checking
         viewModelScope.launch {
             try {
                 val info = appUpdater.checkForUpdates(currentVersion)
                 updateState = if (info.isUpdateAvailable) {
+                    if (notifySystem && context != null) {
+                        appUpdater.showUpdateNotification(context, info)
+                    }
                     UpdateState.Available(info)
                 } else {
                     UpdateState.UpToDate
@@ -996,6 +1014,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
 
     fun installUpdate(context: Context, apkFile: File) {
         runCatching {
+            appUpdater.cancelUpdateNotification(context)
             appUpdater.installApk(context, apkFile)
         }.onFailure { e ->
             updateState = UpdateState.Error(e.message ?: "Installation failed")
@@ -1004,5 +1023,6 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
 
     fun resetUpdateState() {
         updateState = UpdateState.Idle
+        updateDialogDismissed = false
     }
 }

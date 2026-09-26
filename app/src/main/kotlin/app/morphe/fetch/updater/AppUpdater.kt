@@ -1,8 +1,14 @@
 package app.morphe.fetch.updater
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import app.morphe.fetch.compareVersionNames
 import com.google.gson.Gson
@@ -178,4 +184,70 @@ internal class AppUpdater(
             true
         }
     }
+
+    fun showUpdateNotification(context: Context, info: UpdateInfo) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "App Updates",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Notifications for available Morphe Fetch updates"
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("EXTRA_OPEN_UPDATE", true)
+        } ?: return
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            NOTIFICATION_ID,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val sizeMb = if (info.apkSize > 0) {
+            " (%.1f MB)".format(java.util.Locale.US, info.apkSize / (1024f * 1024f))
+        } else ""
+
+        val notification = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("Morphe Fetch ${info.tagName} Available")
+            .setContentText("A new version is available$sizeMb. Tap to update.")
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    "Morphe Fetch ${info.tagName} is available on GitHub.\nTap to review and install the update."
+                )
+            )
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    fun cancelUpdateNotification(context: Context) {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        notificationManager.cancel(NOTIFICATION_ID)
+    }
+
+    companion object {
+        const val NOTIFICATION_CHANNEL_ID = "app_updates"
+        const val NOTIFICATION_ID = 2001
+    }
 }
+
