@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -66,6 +67,8 @@ import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -222,7 +225,7 @@ internal fun DownloadSourcesContent(
                     val isEnabled = source !in settings.disabledSources
                     val isPreferred = settings.preferredSource == source
 
-                    // Per-source: compact 2-line layout (+ Aurora account row)
+                    // Per-source: compact layout (+ Aurora account row)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -231,9 +234,9 @@ internal fun DownloadSourcesContent(
                                 else Modifier
                             )
                             .padding(horizontal = 12.dp, vertical = 7.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        verticalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
-                        // Line 1: Avatar + Name + Default badge + Toggle (all on one row)
+                        // Line 1: Avatar + Name + Default badge + Toggle
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -285,7 +288,7 @@ internal fun DownloadSourcesContent(
                             )
                         }
 
-                        // Line 2: Set Default • Solo inline text links
+                        // Line 2: Set Default · Solo — tight under the name
                         if (!isEnabled) {
                             Text(
                                 text = "Disabled",
@@ -351,7 +354,7 @@ internal fun DownloadSourcesContent(
                             }
                         }
 
-                        // Line 3 (Aurora only): email + settings icon — no profile icon
+                        // Line 3 (Aurora only): email as static text + standalone settings IconButton
                         if (source == DownloadSource.AURORA && isEnabled) {
                             val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
                             val accountText = when {
@@ -359,39 +362,32 @@ internal fun DownloadSourcesContent(
                                 hasAccount -> "Custom token"
                                 else -> "Anonymous session"
                             }
-                            Surface(
-                                shape = RoundedCornerShape(5.dp),
-                                color = if (hasAccount) MaterialTheme.colorScheme.primary.copy(alpha = 0.09f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-                                border = BorderStroke(
-                                    0.5.dp,
-                                    if (hasAccount) MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f)
-                                ),
-                                onClick = { showAuroraAccountDialog = true },
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 32.dp)
+                                    .padding(top = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                Text(
+                                    text = accountText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (hasAccount) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = { showAuroraAccountDialog = true },
+                                    modifier = Modifier.size(28.dp)
                                 ) {
-                                    Text(
-                                        text = accountText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Medium,
-                                        color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
                                     Icon(
                                         imageVector = Icons.Outlined.Tune,
                                         contentDescription = "Configure account",
-                                        tint = if (hasAccount) MaterialTheme.colorScheme.primary.copy(alpha = 0.75f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(12.dp)
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -819,69 +815,74 @@ internal fun HelperSettingsScreen(
     }
 
     if (!isExpanded && sourcesDialog) {
-        AlertDialog(
+        Dialog(
             onDismissRequest = { sourcesDialog = false },
-            confirmButton = {},
-            shape = RoundedCornerShape(MorpheDefaults.SectionCornerRadius),
-            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .wrapContentHeight(),
+                shape = RoundedCornerShape(MorpheDefaults.SectionCornerRadius),
+                color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
+                tonalElevation = 1.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Dns,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Dns,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
+                            Text("Download Sources", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "${enabledSources.size} of ${DownloadSource.entries.size} active",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = { sourcesDialog = false },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = "Close",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(1.dp)
-                    ) {
-                        Text("Download Sources", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(
-                            text = "${enabledSources.size} of ${DownloadSource.entries.size} active",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(
-                        onClick = { sourcesDialog = false },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = "Close",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            },
-            text = {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 520.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
+
+                    // Content — no scroll needed, fits in one screen
                     DownloadSourcesContent(
                         settings = settings,
                         onSettingsChange = onSettingsChange
                     )
                 }
             }
-        )
+        }
     }
     if (!isExpanded && historyDialog) {
         AlertDialog(
