@@ -182,6 +182,9 @@ internal fun CandidateInfoChips(request: HelperRequest, candidate: DownloadCandi
         if (candidate.variantLabel != null) {
             MorpheStatusBadge(text = candidate.variantLabel, tone = SemanticTone.Neutral)
         } else when (candidate.source) {
+            DownloadSource.AURORA -> {
+                MorpheStatusBadge(text = "Google Play", tone = SemanticTone.Success)
+            }
             DownloadSource.APK_PURE -> {
                 // APKPure API silently selects the device-best APK — make that explicit
                 MorpheStatusBadge(text = "Device-matched", tone = SemanticTone.Neutral)

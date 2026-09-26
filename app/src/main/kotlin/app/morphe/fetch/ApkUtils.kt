@@ -495,3 +495,15 @@ internal fun capturedDownloadFileName(
         ?: "${candidate.packageName}-${candidate.versionName ?: "download"}.$extension"
     return baseName.sanitizeFileName()
 }
+
+internal fun looksLikePackageName(value: String): Boolean {
+    val clean = value.trim()
+    if (!clean.contains('.')) return false
+    val segments = clean.split('.')
+    if (segments.size < 2) return false
+    return segments.all { segment ->
+        segment.isNotEmpty() &&
+            segment.first().isLetter() &&
+            segment.all { it.isLetterOrDigit() || it == '_' }
+    }
+}

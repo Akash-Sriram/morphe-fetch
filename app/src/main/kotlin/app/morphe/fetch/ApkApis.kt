@@ -21,7 +21,8 @@ internal data class ApkMirrorVariant(
     val fileKind: String,
     val arch: String?,
     val dpi: String?,
-    val isBundle: Boolean
+    val isBundle: Boolean,
+    val versionCode: Long? = null
 )
 
 internal data class UptodownVersionResponse(

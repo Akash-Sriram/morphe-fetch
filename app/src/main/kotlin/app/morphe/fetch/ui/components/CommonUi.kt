@@ -247,6 +247,7 @@ internal data class SourceBrand(
 )
 
 internal fun DownloadSource.brand(): SourceBrand = when (this) {
+    DownloadSource.AURORA -> SourceBrand(resId = R.drawable.ic_src_play)
     DownloadSource.APK_PURE -> SourceBrand(resId = R.drawable.ic_src_apkpure)
     DownloadSource.APK_COMBO -> SourceBrand(resId = R.drawable.ic_src_apkcombo)
     DownloadSource.UPTODOWN -> SourceBrand(resId = R.drawable.ic_src_uptodown)

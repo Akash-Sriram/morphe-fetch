@@ -173,6 +173,7 @@ internal data class HelperRequest(
 
     fun sourceHintUrlsFor(source: DownloadSource): List<String> {
         val domain = when (source) {
+            DownloadSource.AURORA -> "play.google.com"
             DownloadSource.APK_PURE -> "apkpure.com"
             DownloadSource.APK_COMBO -> "apkcombo.com"
             DownloadSource.UPTODOWN -> "uptodown.com"
@@ -247,13 +248,15 @@ internal enum class DownloadSource(
     val sortIndex: Int,
     val supportsManualArtifactPicker: Boolean = true
 ) {
-    APK_PURE("APKPure", 0),
-    APK_COMBO("APKCombo", 1),
-    UPTODOWN("Uptodown", 2),
-    APK_MIRROR("APKMirror", 3)
+    AURORA("Aurora", 0),
+    APK_PURE("APKPure", 1),
+    APK_COMBO("APKCombo", 2),
+    UPTODOWN("Uptodown", 3),
+    APK_MIRROR("APKMirror", 4)
 }
 
 internal fun DownloadSource.searchDomain(): String? = when (this) {
+    DownloadSource.AURORA -> "play.google.com"
     DownloadSource.APK_PURE -> "apkpure.com"
     DownloadSource.APK_COMBO -> "apkcombo.com"
     DownloadSource.UPTODOWN -> "uptodown.com"

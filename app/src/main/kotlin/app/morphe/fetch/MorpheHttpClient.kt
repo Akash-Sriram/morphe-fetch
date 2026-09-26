@@ -329,4 +329,15 @@ internal object MorpheHttpClient {
             .readTimeout(10, TimeUnit.SECONDS)
             .build()
     }
+
+    val gplayClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectionPool(connectionPool)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .addInterceptor(httpLoggingInterceptor("Aurora"))
+            .build()
+    }
 }

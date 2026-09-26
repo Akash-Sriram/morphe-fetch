@@ -132,6 +132,8 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:3.0.0")
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("org.jsoup:jsoup:1.22.1")
+    implementation("com.auroraoss:gplayapi:3.6.4")
+    implementation("com.google.protobuf:protobuf-javalite:4.35.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")

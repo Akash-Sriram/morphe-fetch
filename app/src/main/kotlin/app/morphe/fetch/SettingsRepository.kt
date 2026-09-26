@@ -27,7 +27,10 @@ internal data class HelperSettings(
     val disabledSources: Set<DownloadSource> = emptySet(),
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // Source opened by default when Helper launches (null = first enabled source).
-    val preferredSource: DownloadSource? = null
+    val preferredSource: DownloadSource? = null,
+    val auroraEmail: String? = null,
+    val auroraAuthToken: String? = null,
+    val auroraTokenType: String = "AUTH"
 )
 
 internal enum class ThemeMode(
@@ -81,9 +84,12 @@ internal enum class NetworkPolicy(
     );
 
     fun blockReason(context: Context): String? {
+        if (this == WIFI_AND_MOBILE) return null
+
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
             ?: return "Network status is unavailable. Change Helper settings or try Manual mode."
         val activeNetwork = connectivity.activeNetwork
+            ?: connectivity.allNetworks.firstOrNull()
             ?: return "No active network is available. Connect to an allowed network or use Manual mode."
         val capabilities = connectivity.getNetworkCapabilities(activeNetwork)
             ?: return "Network status is unavailable. Change Helper settings or try Manual mode."
@@ -130,7 +136,10 @@ internal fun Context.loadHelperSettings(): HelperSettings {
             ThemeMode.SYSTEM
         ),
         preferredSource = prefs.getString("preferred_source", null)
-            ?.let { name -> DownloadSource.entries.firstOrNull { it.name == name } }
+            ?.let { name -> DownloadSource.entries.firstOrNull { it.name == name } },
+        auroraEmail = prefs.getString("aurora_email", null),
+        auroraAuthToken = prefs.getString("aurora_auth_token", null),
+        auroraTokenType = prefs.getString("aurora_token_type", "AUTH") ?: "AUTH"
     )
     logcatLoggingEnabled = settings.logcatLogging
     return settings
@@ -148,6 +157,9 @@ internal fun Context.saveHelperSettings(settings: HelperSettings) {
         .putStringSet("disabled_sources", settings.disabledSources.map { it.name }.toSet())
         .putString("theme_mode", settings.themeMode.name)
         .putString("preferred_source", settings.preferredSource?.name)
+        .putString("aurora_email", settings.auroraEmail)
+        .putString("aurora_auth_token", settings.auroraAuthToken)
+        .putString("aurora_token_type", settings.auroraTokenType)
         .apply()
     syncNightModeWithSystem(settings.themeMode)
 }

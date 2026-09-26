@@ -719,19 +719,27 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         // download modal, under the "APK file hashes" block. Single APKs carry
         // it; bundles don't (there is no single file to hash).
         val expectedSha256 = if (isBundle) null else apkMirrorVariantFileSha256(variantDoc)
+        val extractedVersionCode = variant?.versionCode ?: apkMirrorExtractVersionCode(variantDoc)
+        if (extractedVersionCode != null && !resolvedVersion.isNullOrBlank()) {
+            app.morphe.fetch.aurora.ApkMirrorVersionResolver.cacheVersionCode(
+                request.packageName,
+                resolvedVersion,
+                extractedVersionCode
+            )
+        }
 
         return DownloadCandidate(
             source = DownloadSource.APK_MIRROR,
             name = request.appName,
             packageName = request.packageName,
             versionName = resolvedVersion,
-            versionCode = null,
+            versionCode = extractedVersionCode,
             url = finalUrl,
             fileKind = fileKind,
             option = option,
             directDownload = true,
             captchaUrl = downloadButtonUrl,
-            versionStatus = request.versionStatus(resolvedVersion, null),
+            versionStatus = request.versionStatus(resolvedVersion, extractedVersionCode),
             formatMatches = request.acceptsFormat(fileKind),
             variantLabel = variantLabel,
             files = listOf(
@@ -827,6 +835,24 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         }
     }
 
+    private fun apkMirrorExtractVersionCode(doc: Document): Long? {
+        val specRows = doc.select(".appspec-row, div.appspec-value, tr, div.notesWrap")
+        for (row in specRows) {
+            val text = row.text()
+            if (text.contains("Version code", ignoreCase = true)) {
+                val digits = Regex("""\b(\d{6,11})\b""").find(text)?.groupValues?.get(1)
+                digits?.toLongOrNull()?.let { return it }
+            }
+        }
+        val title = doc.selectFirst("h1, h2, .version-title, .app-title")?.text().orEmpty()
+        Regex("""\((\d{6,11})\)""").find(title)?.groupValues?.get(1)?.toLongOrNull()?.let {
+            return it
+        }
+        val bodyText = doc.body().text()
+        val codeMatch = Regex("""(?i)Version\s*code\s*[:\s]+(\d{6,11})""").find(bodyText)
+        return codeMatch?.groupValues?.get(1)?.toLongOrNull()
+    }
+
     private fun apkMirrorVariantFromRow(row: Element): ApkMirrorVariant? {
         val url = row.selectFirst("div.table-cell:nth-child(1) a[href]")
             ?.attr("href")
@@ -843,13 +869,18 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         val arch = cells.getOrNull(1)?.text()?.trim()?.takeIf(String::isNotBlank)
         val dpi = cells.getOrNull(3)?.text()?.trim()?.takeIf(String::isNotBlank)
 
+        val firstCellText = cells.firstOrNull()?.text().orEmpty()
+        val rowVersionCode = Regex("""\b(\d{6,11})\b""").find(firstCellText)?.groupValues?.get(1)?.toLongOrNull()
+            ?: Regex("""\b(\d{6,11})\b""").find(row.text())?.groupValues?.get(1)?.toLongOrNull()
+
         return ApkMirrorVariant(
             url = url,
             type = type,
             fileKind = fileKind,
             arch = arch,
             dpi = dpi,
-            isBundle = fileKind != "apk"
+            isBundle = fileKind != "apk",
+            versionCode = rowVersionCode
         )
     }
 

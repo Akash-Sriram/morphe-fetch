@@ -11,10 +11,14 @@
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="PackageVisibilityPolicy,QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
 
     <queries>
         <package android:name="app.morphe.manager" />
         <package android:name="app.morphe.manager.debug" />
+        <package android:name="app.revanced.android.gms" />
+        <package android:name="com.google.android.gms" />
+        <package android:name="com.android.vending" />
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="*/*" />

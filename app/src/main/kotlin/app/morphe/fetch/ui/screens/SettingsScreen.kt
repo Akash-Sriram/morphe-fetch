@@ -1,6 +1,17 @@
 package app.morphe.fetch
 
+import android.accounts.AccountManager
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import app.morphe.fetch.aurora.MicroGAccountTokenProvider
+import app.morphe.fetch.aurora.GPlayHttpClient
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -67,6 +78,7 @@ import app.morphe.fetch.BuildConfig
 import app.morphe.fetch.updater.UpdateInfo
 import app.morphe.fetch.updater.UpdateState
 import java.io.File
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -164,6 +176,8 @@ internal fun DownloadSourcesContent(
                 )
             }
         }
+
+        var showAuroraAccountDialog by remember { mutableStateOf(false) }
 
         // Source list
         DownloadSource.entries.forEach { source ->
@@ -263,8 +277,40 @@ internal fun DownloadSourcesContent(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                                 )
                             }
+
+                            if (source == DownloadSource.AURORA && isEnabled) {
+                                val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
+                                Text(
+                                    text = "•",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Text(
+                                    text = if (!settings.auroraEmail.isNullOrBlank()) settings.auroraEmail else if (hasAccount) "Custom" else "Anonymous",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.clickable { showAuroraAccountDialog = true }
+                                )
+                            }
                         }
                     }
+
+                    if (source == DownloadSource.AURORA && isEnabled) {
+                        val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
+                        IconButton(
+                            onClick = { showAuroraAccountDialog = true },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Tune,
+                                contentDescription = "Aurora Account Settings",
+                                tint = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
                     Switch(
                         checked = isEnabled,
                         onCheckedChange = { checked ->
@@ -297,10 +343,381 @@ internal fun DownloadSourcesContent(
             }
         }
 
+        if (showAuroraAccountDialog) {
+            AuroraAccountDialog(
+                settings = settings,
+                onSettingsChange = onSettingsChange,
+                onDismiss = { showAuroraAccountDialog = false }
+            )
+        }
+
         Text(
             text = "At least one source must remain active.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+@Composable
+private fun AuroraAccountDialog(
+    settings: HelperSettings,
+    onSettingsChange: (HelperSettings) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val hostActivity = remember(context) { context.findActivity() }
+    val scope = rememberCoroutineScope()
+
+    var showManualDialog by remember { mutableStateOf(false) }
+    var inputEmail by rememberSaveable { mutableStateOf(settings.auroraEmail.orEmpty()) }
+    var inputToken by rememberSaveable { mutableStateOf(settings.auroraAuthToken.orEmpty()) }
+    var inputType by rememberSaveable { mutableStateOf(settings.auroraTokenType) }
+    var isAuthenticating by remember { mutableStateOf(false) }
+
+    val tokenProvider = remember {
+        MicroGAccountTokenProvider(
+            context = context,
+            httpClient = GPlayHttpClient(MorpheHttpClient.gplayClient)
+        )
+    }
+    val availableAccounts = remember(tokenProvider) {
+        tokenProvider.getAvailableAccounts()
+    }
+
+    val accountChooserLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val chosenAccountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+        val chosenAccountType = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE)
+        if (!chosenAccountName.isNullOrBlank()) {
+            isAuthenticating = true
+            scope.launch {
+                try {
+                    val targetActivity = hostActivity ?: context.findActivity()
+                    val token = tokenProvider.fetchTokenForEmail(chosenAccountName, targetActivity, chosenAccountType)
+                    onSettingsChange(
+                        settings.copy(
+                            auroraEmail = chosenAccountName,
+                            auroraAuthToken = token,
+                            auroraTokenType = "AUTH"
+                        )
+                    )
+                    Toast.makeText(context, "Google account connected: $chosenAccountName", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    android.util.Log.e("AuroraAccount", "Auth error: ${e.message}", e)
+                    Toast.makeText(context, "Auth error: ${e.message}", Toast.LENGTH_LONG).show()
+                } finally {
+                    isAuthenticating = false
+                }
+            }
+        }
+    }
+
+    val isConfigured = !settings.auroraAuthToken.isNullOrBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Google Play Account",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isConfigured) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    }
+                ) {
+                    Text(
+                        text = if (isConfigured) "Logged In" else "Anonymous",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isConfigured) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (isConfigured) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Account: ${settings.auroraEmail ?: "Custom"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Token: ${settings.auroraAuthToken.take(12)}... (${settings.auroraTokenType})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        HelperOutlinedButton(
+                            text = "Edit Token",
+                            onClick = {
+                                inputEmail = settings.auroraEmail.orEmpty()
+                                inputToken = settings.auroraAuthToken.orEmpty()
+                                inputType = settings.auroraTokenType
+                                showManualDialog = true
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        HelperOutlinedButton(
+                            text = "Sign Out",
+                            onClick = {
+                                onSettingsChange(
+                                    settings.copy(
+                                        auroraEmail = null,
+                                        auroraAuthToken = null
+                                    )
+                                )
+                                Toast.makeText(context, "Switched to Anonymous Google Play session", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Sign in using your device's MicroG-RE account for higher rate limits, or stay anonymous.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (isAuthenticating) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text("Authenticating with Google Play via MicroG...", style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else {
+                        if (availableAccounts.isNotEmpty()) {
+                            Text(
+                                text = "Detected device accounts:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            availableAccounts.forEach { acc ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(enabled = !isAuthenticating) {
+                                            isAuthenticating = true
+                                            scope.launch {
+                                                try {
+                                                    val targetActivity = hostActivity ?: context.findActivity()
+                                                    val token = tokenProvider.fetchTokenForEmail(acc.name, targetActivity, acc.type)
+                                                    onSettingsChange(
+                                                        settings.copy(
+                                                            auroraEmail = acc.name,
+                                                            auroraAuthToken = token,
+                                                            auroraTokenType = "AUTH"
+                                                        )
+                                                    )
+                                                    Toast.makeText(context, "Connected: ${acc.name}", Toast.LENGTH_SHORT).show()
+                                                } catch (e: Exception) {
+                                                    android.util.Log.e("AuroraAccount", "Auth error: ${e.message}", e)
+                                                    Toast.makeText(context, "Auth error: ${e.message}", Toast.LENGTH_LONG).show()
+                                                } finally {
+                                                    isAuthenticating = false
+                                                }
+                                            }
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = acc.name,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Text(
+                                                text = if (acc.type == MicroGAccountTokenProvider.REVANCED_ACCOUNT_TYPE) "MicroG-RE" else "Google Account",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            text = "Login",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            HelperButton(
+                                text = "Other Account",
+                                onClick = {
+                                    val intent = AccountManager.newChooseAccountIntent(
+                                        null,
+                                        null,
+                                        tokenProvider.getSupportedAccountTypes(),
+                                        false,
+                                        null,
+                                        null,
+                                        null,
+                                        null
+                                    )
+                                    accountChooserLauncher.launch(intent)
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            HelperOutlinedButton(
+                                text = "Enter Token",
+                                onClick = {
+                                    inputEmail = settings.auroraEmail.orEmpty()
+                                    inputToken = settings.auroraAuthToken.orEmpty()
+                                    inputType = settings.auroraTokenType
+                                    showManualDialog = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            HelperButton(
+                text = "Close",
+                onClick = onDismiss
+            )
+        }
+    )
+
+    if (showManualDialog) {
+        AlertDialog(
+            onDismissRequest = { showManualDialog = false },
+            title = { Text("Google Play Account Token") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Enter your Google email and auth token (OAuth or AAS token) to authorize direct downloads.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = inputEmail,
+                        onValueChange = { inputEmail = it },
+                        label = { Text("Email (e.g. user@gmail.com)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = inputToken,
+                        onValueChange = { inputToken = it },
+                        label = { Text("Account Token") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Type:", style = MaterialTheme.typography.labelMedium)
+                        listOf("AUTH", "AAS").forEach { type ->
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (inputType == type) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.clickable { inputType = type }
+                            ) {
+                                Text(
+                                    text = type,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (inputType == type) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (inputType == type) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                HelperButton(
+                    text = "Save",
+                    onClick = {
+                        val cleanToken = inputToken.trim()
+                        val cleanEmail = inputEmail.trim()
+                        if (cleanToken.isNotBlank()) {
+                            onSettingsChange(
+                                settings.copy(
+                                    auroraEmail = cleanEmail.ifBlank { null },
+                                    auroraAuthToken = cleanToken,
+                                    auroraTokenType = inputType
+                                )
+                            )
+                            showManualDialog = false
+                            Toast.makeText(context, "Account token saved", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Token cannot be empty", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+            },
+            dismissButton = {
+                HelperOutlinedButton(
+                    text = "Cancel",
+                    onClick = { showManualDialog = false }
+                )
+            }
         )
     }
 }

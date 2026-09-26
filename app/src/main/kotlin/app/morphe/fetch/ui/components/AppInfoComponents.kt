@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Download
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -201,7 +203,11 @@ internal fun AppInfoCard(
                 )
 
                 // Format badge
-                val formatText = (request.requestedFileType ?: "APK").uppercase(Locale.US)
+                val formatText = when {
+                    request.requestedFileType != null -> request.requestedFileType.uppercase(Locale.US)
+                    request.allowSplitArchive -> "APK / Split"
+                    else -> "APK"
+                }
                 InfoBadge(
                     label = formatText,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
@@ -253,12 +259,15 @@ internal fun EmptyLaunchState(
     var isCatalogLoading by remember { mutableStateOf(false) }
 
     var suggestions by remember { mutableStateOf<List<ArchiveApp>>(emptyList()) }
+    var pendingUnconfirmedQuery by remember { mutableStateOf<String?>(null) }
+    var pendingSuggestions by remember { mutableStateOf<List<ArchiveApp>>(emptyList()) }
 
     val isSearching = !isOverlayOpen && (searchQuery.isNotEmpty() || suggestions.isNotEmpty() || isSearchFocused || promptMessage != null)
     BackHandler(enabled = isSearching) {
         searchQuery = ""
         promptMessage = null
         suggestions = emptyList()
+        pendingUnconfirmedQuery = null
         focusManager.clearFocus()
         keyboardController?.hide()
     }
@@ -295,33 +304,24 @@ internal fun EmptyLaunchState(
     val handleSearchSubmission = {
         val q = searchQuery.trim()
         if (q.isNotBlank()) {
+            val looksLikePackage = looksLikePackageName(q)
             val exactMatch = MorpheArchive.findExactMatch(q)
-            if (exactMatch != null) {
+
+            if (looksLikePackage) {
                 keyboardController?.hide()
                 focusManager.clearFocus()
                 promptMessage = null
-                onSearch(exactMatch.packageName, selectedSource)
+                onSearch(q, selectedSource)
             } else {
                 val currentMatches = if (suggestions.isNotEmpty()) suggestions else MorpheArchive.searchCatalog(q)
-                when {
-                    currentMatches.size == 1 -> {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        promptMessage = null
-                        onSearch(currentMatches.first().packageName, selectedSource)
-                    }
-                    currentMatches.size > 1 -> {
-                        keyboardController?.hide()
-                        suggestions = currentMatches.take(30)
-                        promptMessage = "Multiple apps match. Please select an app from the list below."
-                    }
-                    else -> {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        promptMessage = null
-                        onSearch(q, selectedSource)
-                    }
-                }
+                keyboardController?.hide()
+                focusManager.clearFocus()
+                promptMessage = null
+                pendingUnconfirmedQuery = q
+                pendingSuggestions = buildList {
+                    if (exactMatch != null) add(exactMatch)
+                    addAll(currentMatches.filter { it.packageName != exactMatch?.packageName })
+                }.take(3)
             }
         }
     }
@@ -680,6 +680,122 @@ internal fun EmptyLaunchState(
             onClick = onFindApps,
             icon = Icons.Outlined.Explore,
             modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    if (pendingUnconfirmedQuery != null) {
+        val unconfirmed = pendingUnconfirmedQuery!!
+        AlertDialog(
+            onDismissRequest = { pendingUnconfirmedQuery = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Outlined.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "App Name Entered",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "\"$unconfirmed\" was not selected from the list and is not a package name (e.g. com.example.app).",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "APK repositories require an exact package name to locate downloads. Searching by app name directly may fail to find APKs.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (pendingSuggestions.isNotEmpty()) {
+                        Text(
+                            text = "Did you mean:",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            pendingSuggestions.forEach { app ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            val pkg = app.packageName
+                                            pendingUnconfirmedQuery = null
+                                            searchQuery = pkg
+                                            onSearch(pkg, selectedSource)
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        AppAvatar(
+                                            packageName = app.packageName,
+                                            initial = app.name.firstOrNull()?.uppercaseChar() ?: '?',
+                                            iconUrl = app.iconUrl,
+                                            size = 32.dp,
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = app.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                text = app.packageName,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = Icons.Outlined.ChevronRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                HelperButton(
+                    text = "Proceed to search",
+                    onClick = {
+                        val raw = unconfirmed
+                        pendingUnconfirmedQuery = null
+                        onSearch(raw, selectedSource)
+                    }
+                )
+            },
+            dismissButton = {
+                HelperOutlinedButton(
+                    text = "Correct info",
+                    onClick = {
+                        pendingUnconfirmedQuery = null
+                    }
+                )
+            }
         )
     }
 }

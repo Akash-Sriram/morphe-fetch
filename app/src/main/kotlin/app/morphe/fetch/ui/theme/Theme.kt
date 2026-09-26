@@ -9,8 +9,10 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -56,11 +58,16 @@ internal fun HelperTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = MorpheTypography,
-        content = content
-    )
+    val windowSizeClass = calculateWindowSizeClass()
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalWindowSizeClass provides windowSizeClass
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = MorpheTypography,
+            content = content
+        )
+    }
 }
 
 /**
@@ -114,9 +121,57 @@ internal object MorpheDefaults {
     const val DIALOG_SCALE = 0.95f
 }
 
+enum class WindowWidthSizeClass {
+    Compact,
+    Medium,
+    Expanded
+}
+
+enum class WindowHeightSizeClass {
+    Compact,
+    Medium,
+    Expanded
+}
+
+data class WindowSizeClass(
+    val widthSizeClass: WindowWidthSizeClass,
+    val heightSizeClass: WindowHeightSizeClass
+)
+
+@Composable
+internal fun calculateWindowSizeClass(): WindowSizeClass {
+    val config = LocalConfiguration.current
+    val width = config.screenWidthDp
+    val height = config.screenHeightDp
+
+    val widthClass = when {
+        width < 600 -> WindowWidthSizeClass.Compact
+        width < 840 -> WindowWidthSizeClass.Medium
+        else -> WindowWidthSizeClass.Expanded
+    }
+    val heightClass = when {
+        height < 480 -> WindowHeightSizeClass.Compact
+        height < 900 -> WindowHeightSizeClass.Medium
+        else -> WindowHeightSizeClass.Expanded
+    }
+    return WindowSizeClass(widthClass, heightClass)
+}
+
+val LocalWindowSizeClass = compositionLocalOf<WindowSizeClass?> { null }
+
 @Composable
 internal fun isExpandedScreen(): Boolean {
-    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-    return configuration.screenWidthDp >= 720
+    val windowSizeClass = LocalWindowSizeClass.current ?: calculateWindowSizeClass()
+    val config = LocalConfiguration.current
+    return windowSizeClass.widthSizeClass == WindowWidthSizeClass.Expanded ||
+        (windowSizeClass.widthSizeClass == WindowWidthSizeClass.Medium && config.screenWidthDp >= 720)
+}
+
+@Composable
+internal fun isLargeTabletScreen(): Boolean {
+    val windowSizeClass = LocalWindowSizeClass.current ?: calculateWindowSizeClass()
+    val config = LocalConfiguration.current
+    return (windowSizeClass.widthSizeClass == WindowWidthSizeClass.Expanded && config.screenWidthDp >= 900) ||
+        config.screenWidthDp >= 1000
 }
 

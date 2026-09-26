@@ -57,6 +57,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     private val client get() = MorpheHttpClient.baseClient
     private val apkPureClient get() = MorpheHttpClient.apkPureClient
     private val apkMirrorClient get() = MorpheHttpClient.apkMirrorClient
+    private val gplayClient get() = MorpheHttpClient.gplayClient
 
     private val apkPureApi by lazy {
         Retrofit.Builder()
@@ -84,6 +85,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             apkPureApi = apkPureApi
         )
         listOf(
+            AuroraPlayParser(application, gplayClient, apkPureApi = apkPureApi),
             ApkMirrorParser(apkMirrorParserContext),
             UptodownParser(parserContext),
             ApkPureParser(parserContext),
@@ -275,6 +277,26 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                         }
                     ?: ResolveState.Done(resolved.candidates)
             )
+
+            if (source != DownloadSource.AURORA && option == CandidateOption.REQUESTED && resolved.candidates.isNotEmpty()) {
+                val candidateWithCode = resolved.candidates.firstOrNull { it.versionCode != null }
+                val discoveredCode = candidateWithCode?.versionCode
+                val discoveredVersionName = candidateWithCode?.versionName ?: activeRequest.requestedVersionName
+                if (discoveredCode != null && !discoveredVersionName.isNullOrBlank()) {
+                    app.morphe.fetch.aurora.ApkMirrorVersionResolver.cacheVersionCode(
+                        activeRequest.packageName,
+                        discoveredVersionName,
+                        discoveredCode
+                    )
+                    val currentGroup = (uiState as? UiState.Ready)?.result?.sourceGroups?.firstOrNull { it.source == DownloadSource.AURORA }
+                    val auroraEmpty = currentGroup?.recommended is ResolveState.Done &&
+                        (currentGroup.recommended as ResolveState.Done).candidates.isEmpty()
+                    if (auroraEmpty) {
+                        appendLog("Discovered version code $discoveredCode from ${source.label}. Querying Aurora Google Play CDN...", LogLevel.Info)
+                        resolveCandidates(DownloadSource.AURORA, CandidateOption.REQUESTED)
+                    }
+                }
+            }
         }
     }
 
@@ -314,6 +336,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
 
             val preferred = helperSettings.preferredSource
             val defaultOrder = listOf(
+                DownloadSource.AURORA,
                 DownloadSource.APK_PURE,
                 DownloadSource.APK_MIRROR,
                 DownloadSource.UPTODOWN,
