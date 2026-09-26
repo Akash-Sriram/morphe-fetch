@@ -634,6 +634,7 @@ internal fun DownloadHistorySection(
     onShare: (DownloadHistoryEntry) -> Unit
 ) {
     val context = LocalContext.current
+    var localCleared by remember { mutableStateOf(0) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
@@ -651,15 +652,20 @@ internal fun DownloadHistorySection(
             )
             HelperOutlinedButton(
                 text = "Clear",
-                onClick = onClear,
+                enabled = entries.isNotEmpty(),
+                onClick = {
+                    onClear()
+                    localCleared++
+                },
                 modifier = Modifier.width(MorpheDefaults.CompactButtonWidth)
             )
         }
 
-        if (entries.isEmpty()) {
+        val currentEntries = remember(entries.size, entries.lastOrNull(), localCleared) { entries.toList() }
+        if (currentEntries.isEmpty()) {
             InfoCard("No hand-offs recorded yet. Downloads and picked files you return to Morphe show up here.")
         } else {
-            entries.forEach { entry ->
+            currentEntries.forEach { entry ->
                 val usable = remember(entry.uri) { context.isHistoryUriUsable(entry.uri) }
                 HistoryEntryCard(
                     entry = entry,
@@ -766,6 +772,7 @@ internal fun RequestLogsCard(
     onClearLogs: () -> Unit
 ) {
     val context = LocalContext.current
+    var localCleared by remember { mutableStateOf(0) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -778,6 +785,7 @@ internal fun RequestLogsCard(
             HelperOutlinedButton(
                 text = "Share",
                 icon = Icons.Outlined.Share,
+                enabled = logs.isNotEmpty(),
                 onClick = {
                     val share = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
@@ -791,14 +799,18 @@ internal fun RequestLogsCard(
             HelperOutlinedButton(
                 text = "Clear",
                 icon = Icons.Outlined.DeleteOutline,
-                onClick = onClearLogs,
+                enabled = logs.isNotEmpty(),
+                onClick = {
+                    onClearLogs()
+                    localCleared++
+                },
                 modifier = Modifier.weight(1f)
             )
         }
 
         var filterMode by remember { mutableStateOf("Relevant") }
         val errorCount = logs.count { it.level == LogLevel.Error }
-        val filteredLogs = remember(logs, filterMode) {
+        val filteredLogs = remember(logs.size, logs.lastOrNull(), filterMode, localCleared) {
             when (filterMode) {
                 "Errors" -> logs.filter { it.level == LogLevel.Error }
                 "Relevant" -> logs.filterNot {
@@ -806,7 +818,7 @@ internal fun RequestLogsCard(
                         it.message.contains("f-droid.org/en/packages", ignoreCase = true) ||
                         it.message.contains("play-lh.googleusercontent.com", ignoreCase = true)
                 }
-                else -> logs
+                else -> logs.toList()
             }
         }
 

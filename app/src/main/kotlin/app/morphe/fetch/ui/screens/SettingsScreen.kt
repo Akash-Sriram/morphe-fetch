@@ -1017,6 +1017,7 @@ internal fun HelperSettingsScreen(
                         context.clearDownloadsCopies()
                         cacheBytes = 0L
                         downloadsBytes = 0L
+                        Toast.makeText(context, "Cache cleared", Toast.LENGTH_SHORT).show()
                     }
                 )
             }
@@ -1198,114 +1199,216 @@ internal fun HelperSettingsScreen(
                     }
                 }
 
-                // STYLE 1: Top 2x2 Primary Operational Grid
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    PrimaryMetricTile(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Outlined.Dns,
-                        title = "Download Sources",
-                        status = "${enabledSources.size} of ${DownloadSource.entries.size} Active",
-                        badge = settings.preferredSource?.label ?: "Auto",
-                        onClick = { sourcesDialog = true }
-                    )
+                // 1. Sources & Automation
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MorpheSectionTitle(text = "Sources & Automation", icon = Icons.Outlined.Dns)
+                    SectionCard {
+                        Column {
+                            // Download Sources
+                            SettingsRow(
+                                icon = Icons.Outlined.Dns,
+                                title = "Download Sources",
+                                subtitle = "${enabledSources.size} of ${DownloadSource.entries.size} active • Tap to configure",
+                                trailing = {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        MorpheStatusBadge(
+                                            text = settings.preferredSource?.label ?: "Auto",
+                                            tone = SemanticTone.Primary
+                                        )
+                                        ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)
+                                    }
+                                },
+                                onClick = { sourcesDialog = true }
+                            )
 
-                    CacheMetricTile(
-                        modifier = Modifier.weight(1f),
-                        cacheBytes = cacheBytes + downloadsBytes,
-                        onClean = {
-                            context.clearTemporaryDownloads()
-                            context.clearDownloadsCopies()
-                            cacheBytes = 0L
-                            downloadsBytes = 0L
+                            MorpheDivider(fullWidth = true)
+
+                            // Auto-fetch (Zero-Click)
+                            SettingsSwitchItem(
+                                icon = Icons.Outlined.AutoAwesome,
+                                title = "Auto-fetch",
+                                subtitle = "Automatically download and return best match for Morphe",
+                                checked = settings.autoDownloadBestMatch,
+                                onToggle = {
+                                    onSettingsChange(settings.copy(autoDownloadBestMatch = !settings.autoDownloadBestMatch))
+                                }
+                            )
+
+                            MorpheDivider(fullWidth = true)
+
+                            // Network Policy
+                            SettingsRow(
+                                icon = Icons.Outlined.Wifi,
+                                title = "Network Policy",
+                                subtitle = when (settings.networkPolicy) {
+                                    NetworkPolicy.WIFI_AND_MOBILE -> "Wi-Fi & Mobile data allowed"
+                                    NetworkPolicy.WIFI_ONLY -> "Wi-Fi connections only"
+                                    NetworkPolicy.MOBILE_DATA_ONLY -> "Mobile data only"
+                                },
+                                onClick = { policyDialog = true }
+                            )
                         }
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    PrimaryMetricTile(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Outlined.History,
-                        title = "Download History",
-                        status = "${historyEntries.size} APKs",
-                        badge = "View",
-                        onClick = { historyDialog = true }
-                    )
-
-                    PrimaryMetricTile(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Outlined.BugReport,
-                        title = "Activity Logs",
-                        status = "${logs.size} Events",
-                        badge = "View",
-                        onClick = { logsDialog = true }
-                    )
-                }
-
-                // STYLE 2: Bottom 2x2 Control Grid
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    ControlClickableTile(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Outlined.FolderOpen,
-                        title = "Save Location",
-                        subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
-                        onClick = { locationDialog = true }
-                    )
-
-                    ControlClickableTile(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Outlined.Wifi,
-                        title = "Network Policy",
-                        subtitle = if (settings.networkPolicy == NetworkPolicy.WIFI_AND_MOBILE) "Wi-Fi & Data" else "Unmetered",
-                        onClick = { policyDialog = true }
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    ControlSwitchTile(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Outlined.AutoAwesome,
-                        title = "Auto-fetch",
-                        subtitle = "Morphe zero-click",
-                        checked = settings.autoDownloadBestMatch,
-                        onCheckedChange = {
-                            onSettingsChange(settings.copy(autoDownloadBestMatch = it))
-                        }
-                    )
-
-                    ControlSwitchTile(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Outlined.CleaningServices,
-                        title = "Auto-clear",
-                        subtitle = "Purge temp APKs",
-                        checked = settings.deleteTemporaryAfterHandoff,
-                        onCheckedChange = {
-                            onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = it))
-                        }
-                    )
-                }
-
-                ControlSwitchTile(
-                    modifier = Modifier.fillMaxWidth(),
-                    icon = Icons.Outlined.Bolt,
-                    title = "Log to Logcat",
-                    subtitle = "Stream diagnostic logs to ADB",
-                    checked = settings.logcatLogging,
-                    onCheckedChange = {
-                        onSettingsChange(settings.copy(logcatLogging = it))
                     }
-                )
+                }
+
+                // 2. Storage & Cache
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MorpheSectionTitle(text = "Storage & Cache", icon = Icons.Outlined.SdStorage)
+                    SectionCard {
+                        Column {
+                            // Save Location / App Cache Selector
+                            SettingsRow(
+                                icon = Icons.Outlined.FolderOpen,
+                                title = "Download Location",
+                                subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) {
+                                    "Downloads / Morphe Fetch"
+                                } else {
+                                    "App Cache (Temporary)"
+                                },
+                                trailing = {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        MorpheStatusBadge(
+                                            text = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
+                                            tone = SemanticTone.Neutral
+                                        )
+                                        ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)
+                                    }
+                                },
+                                onClick = { locationDialog = true }
+                            )
+
+                            MorpheDivider(fullWidth = true)
+
+                            // Auto-clear Cache
+                            SettingsSwitchItem(
+                                icon = Icons.Outlined.CleaningServices,
+                                title = "Auto-clear Cache",
+                                subtitle = "Purge temporary APKs after returning to Morphe",
+                                checked = settings.deleteTemporaryAfterHandoff,
+                                onToggle = {
+                                    onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = !settings.deleteTemporaryAfterHandoff))
+                                }
+                            )
+
+                            MorpheDivider(fullWidth = true)
+
+                            // Clear Cache Action Row
+                            val totalCache = cacheBytes + downloadsBytes
+                            SettingsRow(
+                                icon = Icons.Outlined.DeleteOutline,
+                                title = "Clear Cache",
+                                subtitle = if (totalCache > 0L) {
+                                    "${totalCache.formatBytes()} used by cached APKs"
+                                } else {
+                                    "Cache is clean (0 B)"
+                                },
+                                trailing = {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (totalCache > 0L) {
+                                            MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                        },
+                                        border = if (totalCache > 0L) {
+                                            BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
+                                        } else null,
+                                        onClick = {
+                                            if (totalCache > 0L) {
+                                                context.clearTemporaryDownloads()
+                                                context.clearDownloadsCopies()
+                                                cacheBytes = 0L
+                                                downloadsBytes = 0L
+                                                Toast.makeText(context, "Cache cleared", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "Clear",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (totalCache > 0L) {
+                                                MaterialTheme.colorScheme.error
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                            },
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                            )
+
+                            MorpheDivider(fullWidth = true)
+
+                            // Download History
+                            SettingsRow(
+                                icon = Icons.Outlined.History,
+                                title = "Download History",
+                                subtitle = "${historyEntries.size} saved APKs • Tap to view or share",
+                                trailing = {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        MorpheStatusBadge(
+                                            text = "${historyEntries.size} APKs",
+                                            tone = SemanticTone.Neutral
+                                        )
+                                        ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)
+                                    }
+                                },
+                                onClick = { historyDialog = true }
+                            )
+                        }
+                    }
+                }
+
+                // 3. Diagnostics & Logs
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MorpheSectionTitle(text = "Diagnostics & Logs", icon = Icons.Outlined.BugReport)
+                    SectionCard {
+                        Column {
+                            // Activity Logs
+                            SettingsRow(
+                                icon = Icons.Outlined.BugReport,
+                                title = "Activity Logs",
+                                subtitle = "${logs.size} recorded events • Network & resolution trace",
+                                trailing = {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        MorpheStatusBadge(
+                                            text = "${logs.size} Events",
+                                            tone = SemanticTone.Neutral
+                                        )
+                                        ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)
+                                    }
+                                },
+                                onClick = { logsDialog = true }
+                            )
+
+                            MorpheDivider(fullWidth = true)
+
+                            // Log to Logcat
+                            SettingsSwitchItem(
+                                icon = Icons.Outlined.Bolt,
+                                title = "Log to Logcat",
+                                subtitle = "Stream diagnostic events to ADB / system logcat",
+                                checked = settings.logcatLogging,
+                                onToggle = {
+                                    onSettingsChange(settings.copy(logcatLogging = !settings.logcatLogging))
+                                }
+                            )
+                        }
+                    }
+                }
 
                 // Updates Card
                 UpdatesCard(
@@ -1391,24 +1494,94 @@ private fun SettingsPreferencesDetail(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                ControlClickableTile(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Outlined.FolderOpen,
-                    title = "Save Location",
-                    subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
-                    onClick = onOpenLocationDialog
-                )
-                ControlClickableTile(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Outlined.Wifi,
-                    title = "Network Policy",
-                    subtitle = if (settings.networkPolicy == NetworkPolicy.WIFI_AND_MOBILE) "Wi-Fi & Data" else "Unmetered",
-                    onClick = onOpenPolicyDialog
-                )
+            SectionCard {
+                Column {
+                    SettingsRow(
+                        icon = Icons.Outlined.FolderOpen,
+                        title = "Download Location",
+                        subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) {
+                            "Downloads / Morphe Fetch"
+                        } else {
+                            "App Cache (Temporary)"
+                        },
+                        trailing = {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                MorpheStatusBadge(
+                                    text = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
+                                    tone = SemanticTone.Neutral
+                                )
+                                ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)
+                            }
+                        },
+                        onClick = onOpenLocationDialog
+                    )
+
+                    MorpheDivider(fullWidth = true)
+
+                    SettingsRow(
+                        icon = Icons.Outlined.Wifi,
+                        title = "Network Policy",
+                        subtitle = when (settings.networkPolicy) {
+                            NetworkPolicy.WIFI_AND_MOBILE -> "Wi-Fi & Mobile data allowed"
+                            NetworkPolicy.WIFI_ONLY -> "Wi-Fi connections only"
+                            NetworkPolicy.MOBILE_DATA_ONLY -> "Mobile data only"
+                        },
+                        trailing = {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                MorpheStatusBadge(
+                                    text = if (settings.networkPolicy == NetworkPolicy.WIFI_AND_MOBILE) "Wi-Fi & Data" else "Unmetered",
+                                    tone = SemanticTone.Neutral
+                                )
+                                ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)
+                            }
+                        },
+                        onClick = onOpenPolicyDialog
+                    )
+
+                    MorpheDivider(fullWidth = true)
+
+                    SettingsRow(
+                        icon = Icons.Outlined.DeleteOutline,
+                        title = "Clear Cache",
+                        subtitle = if (cacheBytes > 0L) {
+                            "${cacheBytes.formatBytes()} used by cached APKs"
+                        } else {
+                            "Cache is clean (0 B)"
+                        },
+                        trailing = {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (cacheBytes > 0L) {
+                                    MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                },
+                                border = if (cacheBytes > 0L) {
+                                    BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))
+                                } else null,
+                                onClick = onCleanCache
+                            ) {
+                                Text(
+                                    text = "Clear",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (cacheBytes > 0L) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                    },
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    )
+                }
             }
         }
 
@@ -1419,39 +1592,42 @@ private fun SettingsPreferencesDetail(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                ControlSwitchTile(
-                    modifier = Modifier.fillMaxWidth(),
-                    icon = Icons.Outlined.AutoAwesome,
-                    title = "Auto-fetch",
-                    subtitle = "Automatically download best matching candidate for Morphe without extra prompt",
-                    checked = settings.autoDownloadBestMatch,
-                    onCheckedChange = {
-                        onSettingsChange(settings.copy(autoDownloadBestMatch = it))
-                    }
-                )
+            SectionCard {
+                Column {
+                    SettingsSwitchItem(
+                        icon = Icons.Outlined.AutoAwesome,
+                        title = "Auto-fetch",
+                        subtitle = "Automatically download best matching candidate for Morphe without extra prompt",
+                        checked = settings.autoDownloadBestMatch,
+                        onToggle = {
+                            onSettingsChange(settings.copy(autoDownloadBestMatch = !settings.autoDownloadBestMatch))
+                        }
+                    )
 
-                ControlSwitchTile(
-                    modifier = Modifier.fillMaxWidth(),
-                    icon = Icons.Outlined.CleaningServices,
-                    title = "Auto-clear handoff",
-                    subtitle = "Purge temporary APK hand-off files after delivery to Morphe",
-                    checked = settings.deleteTemporaryAfterHandoff,
-                    onCheckedChange = {
-                        onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = it))
-                    }
-                )
+                    MorpheDivider(fullWidth = true)
 
-                ControlSwitchTile(
-                    modifier = Modifier.fillMaxWidth(),
-                    icon = Icons.Outlined.Bolt,
-                    title = "Log to Logcat",
-                    subtitle = "Stream detailed Morphe Fetch diagnostic events to Android Logcat / ADB",
-                    checked = settings.logcatLogging,
-                    onCheckedChange = {
-                        onSettingsChange(settings.copy(logcatLogging = it))
-                    }
-                )
+                    SettingsSwitchItem(
+                        icon = Icons.Outlined.CleaningServices,
+                        title = "Auto-clear handoff",
+                        subtitle = "Purge temporary APK hand-off files after delivery to Morphe",
+                        checked = settings.deleteTemporaryAfterHandoff,
+                        onToggle = {
+                            onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = !settings.deleteTemporaryAfterHandoff))
+                        }
+                    )
+
+                    MorpheDivider(fullWidth = true)
+
+                    SettingsSwitchItem(
+                        icon = Icons.Outlined.Bolt,
+                        title = "Log to Logcat",
+                        subtitle = "Stream detailed Morphe Fetch diagnostic events to Android Logcat / ADB",
+                        checked = settings.logcatLogging,
+                        onToggle = {
+                            onSettingsChange(settings.copy(logcatLogging = !settings.logcatLogging))
+                        }
+                    )
+                }
             }
         }
     }
