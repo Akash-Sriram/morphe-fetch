@@ -206,65 +206,29 @@ internal fun DownloadSourcesContent(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         SourceAvatar(source = source, size = 30.dp)
-                        Column(
+                        Row(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
+                            Text(
+                                text = source.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isEnabled) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                            if (isPreferred) {
                                 Text(
-                                    text = source.label,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (isEnabled) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    text = "★ Default",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
                                 )
-                                if (isPreferred) {
-                                    Text(
-                                        text = "★ Default",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-
-                            if (!isEnabled) {
+                            } else if (!isEnabled) {
                                 Text(
-                                    text = "Disabled",
+                                    text = "(Disabled)",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                )
-                            } else if (source == DownloadSource.AURORA) {
-                                val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
-                                val accountText = when {
-                                    !settings.auroraEmail.isNullOrBlank() -> settings.auroraEmail
-                                    hasAccount -> "Custom token session"
-                                    else -> "Anonymous session"
-                                }
-                                Text(
-                                    text = accountText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.clickable { showAuroraAccountDialog = true }
-                                )
-                            }
-                        }
-
-                        if (source == DownloadSource.AURORA && isEnabled) {
-                            val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
-                            IconButton(
-                                onClick = { showAuroraAccountDialog = true },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Tune,
-                                    contentDescription = "Aurora Account Settings",
-                                    tint = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -298,6 +262,64 @@ internal fun DownloadSourcesContent(
                             )
                         )
                     }
+
+                    if (source == DownloadSource.AURORA && isEnabled) {
+                        val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
+                        val accountText = when {
+                            !settings.auroraEmail.isNullOrBlank() -> settings.auroraEmail
+                            hasAccount -> "Custom token session"
+                            else -> "Anonymous session"
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (hasAccount) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                if (hasAccount) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                            ),
+                            onClick = { showAuroraAccountDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = accountText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = if (hasAccount) "Account" else "Configure",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Outlined.Tune,
+                                        contentDescription = "Configure account",
+                                        tint = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
 
                     if (isEnabled) {
                         Row(
