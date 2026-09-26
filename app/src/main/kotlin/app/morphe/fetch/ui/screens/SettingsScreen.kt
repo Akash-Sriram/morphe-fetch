@@ -192,60 +192,127 @@ internal fun DownloadSourcesContent(
                     else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)
                 },
                 border = if (isPreferred) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)) else null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        if (isEnabled) {
-                            val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
-                            if (enabledCount > 1) {
-                                onSettingsChange(
-                                    settings.copy(
-                                        disabledSources = settings.disabledSources + source,
-                                        preferredSource = if (isPreferred) null else settings.preferredSource
-                                    )
-                                )
-                            }
-                        } else {
-                            onSettingsChange(
-                                settings.copy(
-                                    disabledSources = settings.disabledSources - source
-                                )
-                            )
-                        }
-                    }
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    SourceAvatar(source = source, size = 30.dp)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = source.label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (isEnabled) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SourceAvatar(source = source, size = 30.dp)
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = source.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isEnabled) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = if (isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                                if (isPreferred) {
+                                    Text(
+                                        text = "★ Default",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            if (!isEnabled) {
+                                Text(
+                                    text = "Disabled",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                            } else if (source == DownloadSource.AURORA) {
+                                val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
+                                val accountText = when {
+                                    !settings.auroraEmail.isNullOrBlank() -> settings.auroraEmail
+                                    hasAccount -> "Custom token session"
+                                    else -> "Anonymous session"
+                                }
+                                Text(
+                                    text = accountText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.clickable { showAuroraAccountDialog = true }
+                                )
+                            }
+                        }
+
+                        if (source == DownloadSource.AURORA && isEnabled) {
+                            val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
+                            IconButton(
+                                onClick = { showAuroraAccountDialog = true },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Tune,
+                                    contentDescription = "Aurora Account Settings",
+                                    tint = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isEnabled,
+                            onCheckedChange = { checked ->
+                                if (!checked) {
+                                    val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
+                                    if (enabledCount > 1) {
+                                        onSettingsChange(
+                                            settings.copy(
+                                                disabledSources = settings.disabledSources + source,
+                                                preferredSource = if (isPreferred) null else settings.preferredSource
+                                            )
+                                        )
+                                    }
+                                } else {
+                                    onSettingsChange(
+                                        settings.copy(
+                                            disabledSources = settings.disabledSources - source
+                                        )
+                                    )
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.surface,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
                         )
+                    }
+
+                    if (isEnabled) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 40.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (isPreferred) {
-                                Text(
-                                    text = "★ Default Preferred",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            } else if (isEnabled) {
+                            if (!isPreferred) {
                                 Text(
                                     text = "Set Default",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Medium,
+                                    fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.clickable {
                                         onSettingsChange(settings.copy(preferredSource = source))
                                     }
@@ -253,92 +320,26 @@ internal fun DownloadSourcesContent(
                                 Text(
                                     text = "•",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline
-                                )
-                                Text(
-                                    text = "Only this",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.clickable {
-                                        val allOthers = DownloadSource.entries.filter { it != source }.toSet()
-                                        onSettingsChange(
-                                            settings.copy(
-                                                disabledSources = allOthers,
-                                                preferredSource = source
-                                            )
-                                        )
-                                    }
-                                )
-                            } else {
-                                Text(
-                                    text = "Disabled",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                                 )
                             }
-
-                            if (source == DownloadSource.AURORA && isEnabled) {
-                                val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
-                                Text(
-                                    text = "•",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline
-                                )
-                                Text(
-                                    text = if (!settings.auroraEmail.isNullOrBlank()) settings.auroraEmail else if (hasAccount) "Custom" else "Anonymous",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.clickable { showAuroraAccountDialog = true }
-                                )
-                            }
-                        }
-                    }
-
-                    if (source == DownloadSource.AURORA && isEnabled) {
-                        val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
-                        IconButton(
-                            onClick = { showAuroraAccountDialog = true },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Tune,
-                                contentDescription = "Aurora Account Settings",
-                                tint = if (hasAccount) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = isEnabled,
-                        onCheckedChange = { checked ->
-                            if (!checked) {
-                                val enabledCount = DownloadSource.entries.count { it !in settings.disabledSources }
-                                if (enabledCount > 1) {
+                            Text(
+                                text = "Only this",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clickable {
+                                    val allOthers = DownloadSource.entries.filter { it != source }.toSet()
                                     onSettingsChange(
                                         settings.copy(
-                                            disabledSources = settings.disabledSources + source,
-                                            preferredSource = if (isPreferred) null else settings.preferredSource
+                                            disabledSources = allOthers,
+                                            preferredSource = source
                                         )
                                     )
                                 }
-                            } else {
-                                onSettingsChange(
-                                    settings.copy(
-                                        disabledSources = settings.disabledSources - source
-                                    )
-                                )
-                            }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = MaterialTheme.colorScheme.surface,
-                            checkedTrackColor = MaterialTheme.colorScheme.primary,
-                            uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                            uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    )
+                            )
+                        }
+                    }
                 }
             }
         }
