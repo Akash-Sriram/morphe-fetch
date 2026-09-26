@@ -19,6 +19,7 @@ A hard fork of [`helper-for-morphe`](https://github.com/rushiranpise/helper-for-
 
 ### Supported Sources
 
+- **Aurora Store** — Direct Google Play CDN downloads with anonymous check-in, device-tailored architectures, and split-APK delivery.
 - **APKMirror** — Direct variants, release dates, and automated session keeper.
 - **APKPure** — Version update API with device-matched architectures.
 - **APKCombo** — Direct API and variant streams.
