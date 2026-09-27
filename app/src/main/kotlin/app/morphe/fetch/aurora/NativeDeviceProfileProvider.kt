@@ -64,6 +64,70 @@ internal object NativeDeviceProfileProvider {
             properties.setProperty("TimeZone", tzId)
         }
 
+        // 3. Overlay real device OS version, display metrics, and hardware identity
+        // This ensures Google Play serves APK variants matching the device's actual Android version (SDK_INT)
+        // rather than newer variants with an incompatible minSdkVersion.
+        properties.setProperty("Build.VERSION.SDK_INT", Build.VERSION.SDK_INT.toString())
+        Build.VERSION.RELEASE?.takeIf { it.isNotBlank() }?.let {
+            properties.setProperty("Build.VERSION.RELEASE", it)
+        }
+        Build.MODEL?.takeIf { it.isNotBlank() }?.let {
+            properties.setProperty("Build.MODEL", it)
+            properties.setProperty("UserReadableName", it)
+        }
+        Build.MANUFACTURER?.takeIf { it.isNotBlank() }?.let {
+            properties.setProperty("Build.MANUFACTURER", it)
+        }
+        Build.BRAND?.takeIf { it.isNotBlank() }?.let {
+            properties.setProperty("Build.BRAND", it)
+        }
+        Build.DEVICE?.takeIf { it.isNotBlank() }?.let {
+            properties.setProperty("Build.DEVICE", it)
+        }
+        Build.PRODUCT?.takeIf { it.isNotBlank() }?.let {
+            properties.setProperty("Build.PRODUCT", it)
+        }
+        Build.HARDWARE?.takeIf { it.isNotBlank() }?.let {
+            properties.setProperty("Build.HARDWARE", it)
+        }
+        Build.ID?.takeIf { it.isNotBlank() }?.let {
+            properties.setProperty("Build.ID", it)
+        }
+        Build.BOOTLOADER?.takeIf { it.isNotBlank() && it != "unknown" }?.let {
+            properties.setProperty("Build.BOOTLOADER", it)
+        }
+        runCatching { Build.getRadioVersion() }.getOrNull()?.takeIf { !it.isNullOrBlank() }?.let {
+            properties.setProperty("Build.RADIO", it)
+        }
+        Build.FINGERPRINT?.takeIf { it.isNotBlank() && !it.contains("test-keys", ignoreCase = true) }?.let {
+            properties.setProperty("Build.FINGERPRINT", it)
+        }
+
+        // Real screen metrics
+        runCatching {
+            val dm = context.resources.displayMetrics
+            properties.setProperty("Screen.Density", dm.densityDpi.toString())
+            properties.setProperty("Screen.Width", dm.widthPixels.toString())
+            properties.setProperty("Screen.Height", dm.heightPixels.toString())
+        }
+
+        // Real features and shared libraries
+        runCatching {
+            val features = context.packageManager.systemAvailableFeatures
+                .mapNotNull { it.name }
+                .filter { it.isNotBlank() }
+            if (features.isNotEmpty()) {
+                properties.setProperty("Features", features.joinToString(","))
+            }
+        }
+        runCatching {
+            val sharedLibs = context.packageManager.systemSharedLibraryNames
+                ?.filter { !it.isNullOrBlank() }
+            if (!sharedLibs.isNullOrEmpty()) {
+                properties.setProperty("SharedLibraries", sharedLibs.joinToString(","))
+            }
+        }
+
         return properties
     }
 

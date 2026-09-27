@@ -117,7 +117,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
 
     private var requestIntentExtras: Bundle? = null
 
-    private val _finishEvents = Channel<Intent>()
+    private val _finishEvents = Channel<Intent>(Channel.BUFFERED)
     val finishEvents = _finishEvents.receiveAsFlow()
 
     private val effectiveDisabledSources: Set<DownloadSource>
@@ -142,18 +142,21 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun handleIntent(intent: Intent) {
-        requestIntentExtras = intent.extras
-        request = HelperRequest.from(intent)
-        startRequestLog(request)
-        val active = request
-        if (active != null) {
-            offerExistingDownloadIfPresent(active)
+        requestIntentExtras = intent.extras ?: requestIntentExtras
+        val newRequest = HelperRequest.from(intent)
+        if (newRequest != null) {
+            request = newRequest
+            startRequestLog(newRequest)
+            offerExistingDownloadIfPresent(newRequest)
             loadCandidates()
-            if (helperSettings.autoDownloadBestMatch && active.callerPackage.isNotBlank() && active.hasRequestedVersionRequest) {
-                startAutoResolveAndDownload(active)
+            if (helperSettings.autoDownloadBestMatch && newRequest.callerPackage.isNotBlank() && newRequest.hasRequestedVersionRequest) {
+                startAutoResolveAndDownload(newRequest)
             }
         } else {
-            uiState = UiState.Idle
+            if (request == null) {
+                startRequestLog(null)
+                uiState = UiState.Idle
+            }
         }
     }
 
@@ -335,13 +338,25 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             }
 
             val preferred = helperSettings.preferredSource
-            val defaultOrder = listOf(
-                DownloadSource.AURORA,
-                DownloadSource.APK_PURE,
-                DownloadSource.APK_MIRROR,
-                DownloadSource.UPTODOWN,
-                DownloadSource.APK_COMBO
-            )
+            val wantsStandaloneApk = currentReq.requestedFileType?.equals("apk", ignoreCase = true) == true ||
+                !currentReq.allowSplitArchive
+            val defaultOrder = if (wantsStandaloneApk) {
+                listOf(
+                    DownloadSource.APK_MIRROR,
+                    DownloadSource.APK_PURE,
+                    DownloadSource.AURORA,
+                    DownloadSource.UPTODOWN,
+                    DownloadSource.APK_COMBO
+                )
+            } else {
+                listOf(
+                    DownloadSource.AURORA,
+                    DownloadSource.APK_PURE,
+                    DownloadSource.APK_MIRROR,
+                    DownloadSource.UPTODOWN,
+                    DownloadSource.APK_COMBO
+                )
+            }
             val sourcesToTry = (listOfNotNull(preferred) + defaultOrder)
                 .distinct()
                 .filter { it !in effectiveDisabledSources }
@@ -372,9 +387,11 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                             currentReq.isRequestedMatch(candidate)
                     }
                     .minByOrNull { candidate ->
+                        val isStandalone = candidate.fileKind.equals("apk", ignoreCase = true)
+                        val standaloneScore = if (isStandalone) 0 else 100
                         val arch = candidate.variantLabel?.lowercase(Locale.US) ?: ""
                         val idx = currentReq.availableAbis.indexOfFirst { it.equals(arch, ignoreCase = true) }
-                        if (idx >= 0) idx else if (arch.isUniversalArchLabel()) 10 else 999
+                        standaloneScore + (if (idx >= 0) idx else if (arch.isUniversalArchLabel()) 10 else 999)
                     }
 
                 if (directMatch == null && src == DownloadSource.UPTODOWN) {
@@ -502,11 +519,13 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         parsers[candidate.source]?.resolveHistoryCandidate(request, candidate)
 
     private fun startRequestLog(request: HelperRequest?) {
-        AppLog.clear()
         if (request == null) {
-            AppLog.setRequestSummary(null)
-            appendLog("Opened without a Morphe request.", LogLevel.Warning)
+            if (AppLog.entries.isEmpty()) {
+                AppLog.setRequestSummary(null)
+                appendLog("Opened without a Morphe request.", LogLevel.Warning)
+            }
         } else {
+            AppLog.clear()
             AppLog.setRequestSummary(
                 buildString {
                     append("App: ${request.appName}\n")
@@ -745,15 +764,13 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                 )
             }
             is DownloadJobManager.Event.Completed -> {
-                if (event.result.belongsToCurrentSession(request, event.epoch)) {
-                    appendLog("Download validated: ${event.result.fileName}.")
-                    val isFromMorphe = request?.callerPackage?.isNotBlank() == true
-                    if (isFromMorphe) {
-                        deliverPendingResult(event.result)
-                    } else {
-                        cancelCompletionNotification()
-                        uiState = UiState.Completed(event.result)
-                    }
+                appendLog("Download completed: ${event.result.fileName}.")
+                cancelCompletionNotification()
+                uiState = UiState.Completed(event.result)
+                val isFromMorphe = (request?.callerPackage?.isNotBlank() == true) ||
+                    (event.result.callerPackage.isNotBlank())
+                if (isFromMorphe) {
+                    deliverPendingResult(event.result)
                 }
             }
             is DownloadJobManager.Event.Failed -> {

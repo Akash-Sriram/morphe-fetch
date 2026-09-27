@@ -17,10 +17,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.core.content.FileProvider
+import java.io.File
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -773,27 +777,72 @@ internal fun RequestLogsCard(
 ) {
     val context = LocalContext.current
     var localCleared by remember { mutableStateOf(0) }
+    var copied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2000)
+            copied = false
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        val actionButtonPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            HelperOutlinedButton(
+                text = if (copied) "Copied!" else "Copy",
+                icon = if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
+                enabled = logs.isNotEmpty(),
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("Morphe Fetch logs", AppLog.exportText()))
+                    copied = true
+                },
+                contentPadding = actionButtonPadding,
+                modifier = Modifier.weight(1f)
+            )
             HelperOutlinedButton(
                 text = "Share",
                 icon = Icons.Outlined.Share,
                 enabled = logs.isNotEmpty(),
                 onClick = {
+                    val logText = AppLog.exportText()
+                    val logFile = runCatching {
+                        val logDir = File(context.cacheDir, "logs").apply { mkdirs() }
+                        File(logDir, "morphe-fetch-logs.txt").apply {
+                            writeText(logText)
+                        }
+                    }.getOrNull()
+
+                    val logUri = logFile?.let {
+                        runCatching {
+                            FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.files",
+                                it
+                            )
+                        }.getOrNull()
+                    }
+
                     val share = Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_SUBJECT, "Morphe Fetch logs")
-                        putExtra(Intent.EXTRA_TEXT, AppLog.exportText())
+                        putExtra(Intent.EXTRA_TEXT, logText)
+                        if (logUri != null) {
+                            putExtra(Intent.EXTRA_STREAM, logUri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
                     }
                     context.startActivity(Intent.createChooser(share, "Share logs"))
                 },
+                contentPadding = actionButtonPadding,
                 modifier = Modifier.weight(1f)
             )
             HelperOutlinedButton(
@@ -804,6 +853,7 @@ internal fun RequestLogsCard(
                     onClearLogs()
                     localCleared++
                 },
+                contentPadding = actionButtonPadding,
                 modifier = Modifier.weight(1f)
             )
         }

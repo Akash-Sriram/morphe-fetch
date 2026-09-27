@@ -47,7 +47,7 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
         val dataCode = uptodownDataCode(pageDoc) ?: return emptyList()
 
         val candidates = buildList {
-            for (page in 1..20) {
+            for (page in 1..5) {
                 val entries = runCatching {
                     gson.fromJson(
                         fetchText(
@@ -294,7 +294,7 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
         detailUrl: String,
         dataCode: String
     ): UptodownVersionEntry? {
-        for (page in 1..20) {
+        for (page in 1..5) {
             val entries = runCatching {
                 gson.fromJson(
                     fetchText("$detailUrl/apps/$dataCode/versions/$page", referer = "$detailUrl/versions"),

@@ -151,7 +151,12 @@ internal class AuroraPlayParser(
                         val match = resp.app_update_response.firstOrNull { it.package_name == request.packageName }
                         if (match != null && match.version_code > 0L) {
                             val reqVName = request.requestedVersionName
-                            if (reqVName == null ||
+                            val isVariant = match.version_name.contains("-secondary", ignoreCase = true) ||
+                                match.version_name.contains("-wear", ignoreCase = true) ||
+                                match.version_name.contains("-tv", ignoreCase = true)
+                            if (isVariant && !request.requestsVariantBuild) {
+                                Log.d(TAG, "Skipping variant build ${match.version_name} from APKPure index for ${request.packageName}")
+                            } else if (reqVName == null ||
                                 request.matchesRequestedVersion(match.version_name, match.version_code) ||
                                 versionsShareMajorMinor(reqVName, match.version_name)
                             ) {

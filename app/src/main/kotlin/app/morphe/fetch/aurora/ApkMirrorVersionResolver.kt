@@ -51,7 +51,18 @@ internal object ApkMirrorVersionResolver {
 
         val searchDoc = Jsoup.parse(searchHtml, searchUrl)
         val releaseLinks = searchDoc.select("a[href*=-release/]")
+        val requestedHasVariant = versionName.contains("-secondary", ignoreCase = true) ||
+            versionName.contains("-wear", ignoreCase = true) ||
+            versionName.contains("-tv", ignoreCase = true)
         val releaseUrl = releaseLinks.firstOrNull { link ->
+            val href = link.attr("href")
+            val isValidRelease = href.contains("-release", ignoreCase = true) && !href.contains("/apk/apkmirror/", ignoreCase = true)
+            if (!isValidRelease) return@firstOrNull false
+            if (requestedHasVariant) return@firstOrNull true
+            !href.contains("-secondary", ignoreCase = true) &&
+                !href.contains("-wear", ignoreCase = true) &&
+                !href.contains("-tv", ignoreCase = true)
+        }?.absUrl("href") ?: releaseLinks.firstOrNull { link ->
             val href = link.attr("href")
             href.contains("-release", ignoreCase = true) && !href.contains("/apk/apkmirror/", ignoreCase = true)
         }?.absUrl("href") ?: return@withContext null

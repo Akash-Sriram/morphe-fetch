@@ -18,6 +18,10 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+
 @Composable
 internal fun HelperTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -58,9 +62,19 @@ internal fun HelperTheme(
         }
     }
 
+    val currentDensity = LocalDensity.current
+    val safeFontScale = currentDensity.fontScale.coerceIn(0.85f, 1.15f)
+    val safeDensity = remember(currentDensity.density, safeFontScale) {
+        Density(
+            density = currentDensity.density,
+            fontScale = safeFontScale
+        )
+    }
+
     val windowSizeClass = calculateWindowSizeClass()
     androidx.compose.runtime.CompositionLocalProvider(
-        LocalWindowSizeClass provides windowSizeClass
+        LocalWindowSizeClass provides windowSizeClass,
+        LocalDensity provides safeDensity
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

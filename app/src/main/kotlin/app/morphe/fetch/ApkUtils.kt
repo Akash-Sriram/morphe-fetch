@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import okhttp3.Request
 import org.jsoup.nodes.Document
 import java.io.ByteArrayInputStream
@@ -171,15 +172,16 @@ internal fun Context.readDownloadedApkMetadataWithBundleCheck(file: File): Downl
                 .lowercase(Locale.US)
             val apkEntries = zip.entries()
                 .asSequence()
-                .filter { !it.isDirectory && it.name.endsWith(".apk", ignoreCase = true) }
+                .filter { !it.isDirectory && (it.name.endsWith(".apk", ignoreCase = true) || !it.name.contains('.')) }
                 .sortedWith(
                     compareBy<java.util.zip.ZipEntry> { entry ->
                         val name = entry.name.substringAfterLast('/').lowercase(Locale.US)
                         when {
-                            name == "base.apk" -> 0
-                            packageHint.isNotEmpty() && name.contains(packageHint) -> 1
-                            name.contains("base") -> 2
-                            else -> 3
+                            name == "base.apk" || name == "main.apk" || name == "base" || name == "main" -> 0
+                            packageHint.isNotEmpty() && name.contains(packageHint) && !name.contains("config") -> 1
+                            name.contains("base") && !name.contains("config") -> 2
+                            name.contains("main") && !name.contains("config") -> 3
+                            else -> 4
                         }
                     }
                         .thenByDescending { it.size }
@@ -189,9 +191,10 @@ internal fun Context.readDownloadedApkMetadataWithBundleCheck(file: File): Downl
 
             var metadata: DownloadedApkMetadata? = null
             for (entry in apkEntries) {
+                val safeEntryCode = kotlin.math.abs(entry.name.hashCode())
                 val extracted = File(
                     validationDir,
-                    "${file.nameWithoutExtension}-${entry.name.hashCode()}.apk".sanitizeFileName()
+                    "val_${System.currentTimeMillis()}_$safeEntryCode.apk"
                 )
                 zip.getInputStream(entry).use { input ->
                     extracted.outputStream().use { output -> input.copyTo(output) }
@@ -205,7 +208,7 @@ internal fun Context.readDownloadedApkMetadataWithBundleCheck(file: File): Downl
             }
             metadata?.let { DownloadedApkValidation(it, isBundle = true) }
         }
-    }.getOrNull()
+    }.onFailure { Log.w("ApkUtils", "Failed to inspect ZIP bundle for ${file.name}", it) }.getOrNull()
 
     if (fromZip != null) return fromZip
 
@@ -222,8 +225,17 @@ internal fun Context.readDownloadedApkMetadataWithBundleCheck(file: File): Downl
 
 @Suppress("DEPRECATION")
 private fun Context.readApkMetadata(file: File): DownloadedApkMetadata? {
-    val info = packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_META_DATA)
-        ?: return null
+    val pm = packageManager
+    val info = runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.getPackageArchiveInfo(file.absolutePath, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            pm.getPackageArchiveInfo(file.absolutePath, 0)
+        }
+    }.getOrNull() ?: runCatching {
+        pm.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_META_DATA)
+    }.getOrNull() ?: return null
+
     val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         info.longVersionCode
     } else {

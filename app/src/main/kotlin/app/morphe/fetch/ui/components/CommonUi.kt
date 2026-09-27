@@ -9,6 +9,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -83,7 +84,8 @@ internal fun HelperButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    icon: ImageVector? = null
+    icon: ImageVector? = null,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
 ) {
     MorpheDialogButton(
         text = text,
@@ -91,7 +93,8 @@ internal fun HelperButton(
         modifier = modifier,
         enabled = enabled,
         icon = icon,
-        filled = true
+        filled = true,
+        contentPadding = contentPadding
     )
 }
 
@@ -101,7 +104,8 @@ internal fun HelperOutlinedButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    icon: ImageVector? = null
+    icon: ImageVector? = null,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
 ) {
     MorpheDialogButton(
         text = text,
@@ -109,7 +113,8 @@ internal fun HelperOutlinedButton(
         modifier = modifier,
         enabled = enabled,
         icon = icon,
-        filled = false
+        filled = false,
+        contentPadding = contentPadding
     )
 }
 

@@ -252,7 +252,7 @@ internal fun MorphePillButton(
         contentColor = if (enabled) tone.content else tone.content.copy(alpha = 0.5f),
         interactionSource = interactionSource,
         modifier = modifier
-            .height(height)
+            .heightIn(min = height)
             .then(if (iconOnly) Modifier.width(height) else Modifier)
             .pressScale(interactionSource = interactionSource, enabled = enabled)
             .semantics { role = Role.Button }
@@ -427,7 +427,8 @@ internal fun MorpheDialogButton(
     icon: ImageVector? = null,
     isDestructive: Boolean = false,
     filled: Boolean = true,
-    textSuffix: String? = null
+    textSuffix: String? = null,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
 ) {
     val textColor = MaterialTheme.colorScheme.onSurface
     val isDark = !textColor.isDarkColor()
@@ -454,11 +455,10 @@ internal fun MorpheDialogButton(
 
     val interactionSource = remember { MutableInteractionSource() }
     val buttonModifier = modifier
-        .height(MorpheDefaults.DialogButtonHeight)
+        .heightIn(min = MorpheDefaults.DialogButtonHeight)
         .pressScale(interactionSource = interactionSource, enabled = enabled)
     val shape = RoundedCornerShape(MorpheDefaults.CardCornerRadius)
     val border = BorderStroke(1.dp, borderColor)
-    val contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
     val content: @Composable RowScope.() -> Unit = {
         if (icon != null) {
             Icon(
@@ -466,12 +466,13 @@ internal fun MorpheDialogButton(
                 contentDescription = null,
                 modifier = Modifier.size(MorpheDefaults.IconSizeSmall)
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(4.dp))
         }
         Text(
             text = text,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
+            softWrap = false,
             overflow = if (textSuffix == null) TextOverflow.Ellipsis else TextOverflow.Clip
         )
         if (textSuffix != null) {

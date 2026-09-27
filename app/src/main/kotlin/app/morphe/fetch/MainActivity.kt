@@ -167,6 +167,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun resolveShareableUri(uri: Uri, fileName: String?): Uri {
+        if (uri.authority == "${packageName}.files") {
+            return uri
+        }
         val cleanName = (fileName ?: uri.lastPathSegment ?: "app.apk").removeSuffix(".zip")
         // Check Download/Morphe Fetch public directory
         val downloadsDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Morphe Fetch")

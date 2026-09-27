@@ -473,7 +473,13 @@ internal class DownloadService : Service() {
                 knownTotal?.let { updateDownloadProgress(candidate, completed + fileCopied, it) }
             }
             completed += stagedFile.length()
-            stagedFile to file.fileName.ifBlank { "split_$index.apk" }.sanitizeFileName()
+            val rawName = file.fileName.ifBlank { "split_$index.apk" }
+            val entryName = when {
+                rawName.equals("main", ignoreCase = true) || rawName.equals("base", ignoreCase = true) -> "base.apk"
+                rawName.endsWith(".apk", ignoreCase = true) -> rawName
+                else -> "$rawName.apk"
+            }.sanitizeFileName()
+            stagedFile to entryName
         }
 
         ZipOutputStream(outputFile.outputStream()).use { zip ->
@@ -739,7 +745,7 @@ internal fun Context.copyToDownloads(file: File): Uri {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, file.name)
             put(MediaStore.Downloads.MIME_TYPE, file.mimeType())
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Morphe Fetch")
+            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Morphe Fetch/")
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -795,15 +801,28 @@ internal fun validateDownloadedArtifact(
 ): File {
     val shouldValidateMetadata = candidate.fileKind.lowercase(Locale.US) in setOf("apk", "apks", "apkm", "xapk") ||
         file.extension.lowercase(Locale.US) in setOf("apk", "apks", "apkm", "xapk")
-    val validation = context.readDownloadedApkMetadataWithBundleCheck(file) ?: run {
-        check(!shouldValidateMetadata) {
-            file.delete()
-            "Downloaded file could not be read as an APK.".withManualModeHint()
+    val validation = context.readDownloadedApkMetadataWithBundleCheck(file)
+    val metadata = validation?.metadata
+    val isBundle = validation?.isBundle ?: false
+
+    if (validation == null) {
+        val isValidArchive = runCatching {
+            java.util.zip.ZipFile(file).use { zip ->
+                zip.getEntry("AndroidManifest.xml") != null ||
+                    zip.entries().asSequence().any { it.name.endsWith(".apk", ignoreCase = true) }
+            }
+        }.getOrDefault(false)
+
+        if (isValidArchive) {
+            Log.w("DownloadService", "Could not parse PackageInfo for ${file.name}, but file is a valid APK/ZIP archive. Proceeding with candidate metadata.")
+        } else {
+            check(!shouldValidateMetadata) {
+                file.delete()
+                "Downloaded file could not be read as an APK.".withManualModeHint()
+            }
+            return file
         }
-        return file
     }
-    val metadata = validation.metadata
-    val isBundle = validation.isBundle
 
     val validatedFile = if (isBundle && file.extension.equals("apk", ignoreCase = true)) {
         val target = File(file.parentFile, "${file.nameWithoutExtension}.xapk")
@@ -818,78 +837,76 @@ internal fun validateDownloadedArtifact(
         file
     }
 
-    val hardMismatches = buildList {
-        if (metadata.packageName != request.packageName) {
-            if (metadata.packageName == "com.uptodown") {
-                add("Uptodown served its store installer stub instead of ${request.packageName}. Select a direct architecture variant.")
-            } else {
-                add("Package: requested ${request.packageName}, found ${metadata.packageName}")
+    if (metadata != null) {
+        val hardMismatches = buildList {
+            if (metadata.packageName != request.packageName) {
+                if (metadata.packageName == "com.uptodown") {
+                    add("Uptodown served its store installer stub instead of ${request.packageName}. Select a direct architecture variant.")
+                } else {
+                    add("Package: requested ${request.packageName}, found ${metadata.packageName}")
+                }
+            }
+
+            // A secondary build (e.g. APKMirror's "-SECONDARY") shares its version
+            // number with the normal release but is a different package Morphe
+            // cannot patch. The source URL/file name betrays it even when the
+            // parsed version and the downloaded manifest look normal.
+            if (candidate.hasVariantBuildMarker && !request.requestsVariantBuild) {
+                add("Variant: the source offered a secondary build Morphe cannot patch")
+            }
+
+            if (candidate.option == CandidateOption.REQUESTED) {
+                val requestedNames = request.knownVersionNames
+                if (
+                    requestedNames.isNotEmpty() &&
+                    requestedNames.none { metadata.versionName.versionNameEquals(it) }
+                ) {
+                    add(
+                        "Version: requested ${requestedNames.joinToString()}, " +
+                            "found ${metadata.versionName ?: "unknown"}"
+                    )
+                }
             }
         }
 
-        // A secondary build (e.g. APKMirror's "-SECONDARY") shares its version
-        // number with the normal release but is a different package Morphe
-        // cannot patch. The source URL/file name betrays it even when the
-        // parsed version and the downloaded manifest look normal.
-        if (candidate.hasVariantBuildMarker && !request.requestsVariantBuild) {
-            add("Variant: the source offered a secondary build Morphe cannot patch")
+        // Wrong package or version name: the file is unusable  delete and fail.
+        check(hardMismatches.isEmpty()) {
+            validatedFile.delete()
+            "Downloaded file does not match Morphe request.\n${hardMismatches.joinToString("\n")}"
+                .withManualModeHint()
         }
 
-        if (candidate.option == CandidateOption.REQUESTED) {
-            val requestedNames = request.knownVersionNames
+        // Version-code-only mismatch: the file is otherwise valid, but its build
+        // differs from the request. Only enforced for Fast Mode, which keeps the
+        // file and asks the user whether to use it anyway; manual downloads
+        // deliver normally.
+        if (checkVersionCode && candidate.option == CandidateOption.REQUESTED) {
+            val requestedCodes = request.requestedVersionCodes +
+                request.compatibleVersionCodes.filter { it > 0L }
             if (
-                requestedNames.isNotEmpty() &&
-                requestedNames.none { metadata.versionName.versionNameEquals(it) }
+                requestedCodes.isNotEmpty() &&
+                metadata.versionCode !in requestedCodes
             ) {
-                add(
-                    "Version: requested ${requestedNames.joinToString()}, " +
-                        "found ${metadata.versionName ?: "unknown"}"
+                throw VersionCodeMismatchException(validatedFile, metadata.versionCode)
+            }
+        }
+
+        // Fast Mode "Latest" must never hand over a file that is not actually
+        // newer than the requested version.
+        if (checkVersionCode && candidate.option == CandidateOption.LATEST) {
+            val requestedName = request.requestedVersionName
+            val foundName = metadata.versionName
+            if (
+                requestedName != null &&
+                foundName != null &&
+                compareVersionNames(foundName, requestedName) <= 0
+            ) {
+                validatedFile.delete()
+                throw IllegalStateException(
+                    "Downloaded \"latest\" version $foundName is not newer than " +
+                        "requested $requestedName. Deleted the file."
                 )
             }
-        }
-    }
-
-    // Wrong package or version name: the file is unusable  delete and fail.
-    check(hardMismatches.isEmpty()) {
-        validatedFile.delete()
-        "Downloaded file does not match Morphe request.\n${hardMismatches.joinToString("\n")}"
-            .withManualModeHint()
-    }
-
-    // Version-code-only mismatch: the file is otherwise valid, but its build
-    // differs from the request. Only enforced for Fast Mode, which keeps the
-    // file and asks the user whether to use it anyway; manual downloads
-    // deliver normally.
-    if (checkVersionCode && candidate.option == CandidateOption.REQUESTED) {
-        val requestedCodes = request.requestedVersionCodes +
-            request.compatibleVersionCodes.filter { it > 0L }
-        if (
-            requestedCodes.isNotEmpty() &&
-            metadata.versionCode !in requestedCodes
-        ) {
-            throw VersionCodeMismatchException(validatedFile, metadata.versionCode)
-        }
-    }
-
-    // Fast Mode "Latest" must never hand over a file that is not actually
-    // newer than the requested version. The downloaded APK's real manifest is
-    // the ground truth here: the source page's version can be misparsed (e.g.
-    // an app slug ending in a digit leaking into the version), which would
-    // make an older build pass the "newer than requested" gate. Delete and
-    // fail loudly instead of delivering an older APK labelled "latest".
-    if (checkVersionCode && candidate.option == CandidateOption.LATEST) {
-        val requestedName = request.requestedVersionName
-        val foundName = metadata.versionName
-        if (
-            requestedName != null &&
-            foundName != null &&
-            compareVersionNames(foundName, requestedName) <= 0
-        ) {
-            validatedFile.delete()
-            throw IllegalStateException(
-                "Downloaded \"latest\" version $foundName is not newer than " +
-                    "requested $requestedName. Deleted the file."
-            )
         }
     }
 

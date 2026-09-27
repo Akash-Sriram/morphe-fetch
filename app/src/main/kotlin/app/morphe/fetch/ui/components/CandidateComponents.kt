@@ -286,7 +286,7 @@ internal fun DownloadingState(
                         text = "Downloading from ${state.candidate.source.label}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
@@ -320,32 +320,12 @@ internal fun DownloadingState(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Text(
-                        text = "${state.percent}%",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    if (state.totalBytes > 0L) {
-                        Text(
-                            text = "${state.bytesDownloaded.formatBytes()} / ${state.totalBytes.formatBytes()}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else if (state.bytesDownloaded > 0L) {
-                        Text(
-                            text = state.bytesDownloaded.formatBytes(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Text(
+                    text = "${state.percent}%",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -362,6 +342,8 @@ internal fun DownloadingState(
                                 text = speed,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
@@ -377,6 +359,8 @@ internal fun DownloadingState(
                                 text = "${formatTransferEta(state.etaMs)} left",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
@@ -395,6 +379,23 @@ internal fun DownloadingState(
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 strokeCap = StrokeCap.Round
             )
+
+            // Byte progress
+            if (state.totalBytes > 0L) {
+                Text(
+                    text = "${state.bytesDownloaded.formatBytes()} / ${state.totalBytes.formatBytes()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (state.bytesDownloaded > 0L) {
+                Text(
+                    text = state.bytesDownloaded.formatBytes(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             // Useful metadata chips row (Format, Architecture, Variant)
             val infoChips = buildList {

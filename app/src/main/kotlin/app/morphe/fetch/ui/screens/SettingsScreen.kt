@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -101,6 +102,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -140,11 +142,12 @@ internal fun DownloadSourcesContent(
         // Quick Action Row: Sleek Compact Pills
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val allEnabled = settings.disabledSources.isEmpty()
             Surface(
+                modifier = Modifier.weight(1f),
                 shape = MorpheDefaults.PillShape,
                 color = if (allEnabled) {
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -161,9 +164,11 @@ internal fun DownloadSourcesContent(
                 }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.CheckCircle,
@@ -171,10 +176,13 @@ internal fun DownloadSourcesContent(
                         modifier = Modifier.size(13.dp),
                         tint = if (allEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
                     )
+                    Spacer(Modifier.width(4.dp))
                     Text(
                         text = "Enable All",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         color = if (allEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
                     )
                 }
@@ -182,6 +190,7 @@ internal fun DownloadSourcesContent(
 
             val isAuto = settings.preferredSource == null
             Surface(
+                modifier = Modifier.weight(1f),
                 shape = MorpheDefaults.PillShape,
                 color = if (isAuto) {
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -198,9 +207,11 @@ internal fun DownloadSourcesContent(
                 }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Refresh,
@@ -208,10 +219,13 @@ internal fun DownloadSourcesContent(
                         modifier = Modifier.size(13.dp),
                         tint = if (isAuto) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.secondary
                     )
+                    Spacer(Modifier.width(4.dp))
                     Text(
                         text = if (isAuto) "Auto Mode" else "Reset to Auto",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         color = if (isAuto) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.secondary
                     )
                 }
@@ -249,6 +263,8 @@ internal fun DownloadSourcesContent(
                                 fontWeight = if (isEnabled) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (isEnabled) MaterialTheme.colorScheme.onSurface
                                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
                             if (isPreferred) {
@@ -815,6 +831,7 @@ internal fun HelperSettingsScreen(
     }
 
     if (!isExpanded && sourcesDialog) {
+        val maxDialogHeight = (LocalConfiguration.current.screenHeightDp * 0.88f).dp
         Dialog(
             onDismissRequest = { sourcesDialog = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -822,13 +839,15 @@ internal fun HelperSettingsScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth(0.92f)
-                    .wrapContentHeight(),
+                    .heightIn(max = maxDialogHeight),
                 shape = RoundedCornerShape(MorpheDefaults.SectionCornerRadius),
                 color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
                 tonalElevation = 1.dp
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 20.dp)
+                        .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     // Header
@@ -875,7 +894,7 @@ internal fun HelperSettingsScreen(
                         }
                     }
 
-                    // Content — no scroll needed, fits in one screen
+                    // Content
                     DownloadSourcesContent(
                         settings = settings,
                         onSettingsChange = onSettingsChange
