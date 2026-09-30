@@ -13,3 +13,4 @@ __pycache__/
 revanced-manager-downloaders/
 *.apk
 .DS_Store
+.android/

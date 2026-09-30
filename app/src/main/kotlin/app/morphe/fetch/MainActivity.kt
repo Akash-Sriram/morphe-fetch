@@ -20,6 +20,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -36,12 +38,14 @@ class MainActivity : ComponentActivity() {
         syncNightModeWithSystem(viewModel.helperSettings.themeMode)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        if (viewModel.deliverPendingResultIfPresent(this)) {
-            return
-        }
+        val isLauncherLaunch = intent.action == Intent.ACTION_MAIN ||
+            intent.categories?.contains(Intent.CATEGORY_LAUNCHER) == true
 
         if (savedInstanceState == null) {
-            viewModel.checkForUpdates(context = this, notifySystem = true)
+            lifecycleScope.launch(Dispatchers.IO) {
+                kotlinx.coroutines.delay(2000L)
+                viewModel.checkForUpdates(context = this@MainActivity, notifySystem = true)
+            }
         }
         if (intent.getBooleanExtra("EXTRA_OPEN_UPDATE", false)) {
             viewModel.showUpdateDialog()
@@ -49,12 +53,16 @@ class MainActivity : ComponentActivity() {
 
         viewModel.handleIntent(intent)
 
+        if (!isLauncherLaunch && viewModel.deliverPendingResultIfPresent(this)) {
+            return
+        }
+
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.finishEvents.collect { resultIntent ->
                     val uri = resultIntent.data
                     val fileName = resultIntent.getStringExtra(DownloadHelperContract.EXTRA_RESULT_FILE_NAME)
-                    if (uri != null) {
+                    if (callingActivity != null && uri != null) {
                         deliverHandoffToMorphe(uri, fileName)
                     } else if (callingActivity != null) {
                         setResult(Activity.RESULT_OK, resultIntent)
@@ -139,13 +147,15 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (viewModel.deliverPendingResultIfPresent(this)) {
-            return
-        }
+        val isLauncherLaunch = intent.action == Intent.ACTION_MAIN ||
+            intent.categories?.contains(Intent.CATEGORY_LAUNCHER) == true
         if (intent.getBooleanExtra("EXTRA_OPEN_UPDATE", false)) {
             viewModel.showUpdateDialog()
         }
         viewModel.handleIntent(intent)
+        if (!isLauncherLaunch && viewModel.deliverPendingResultIfPresent(this)) {
+            return
+        }
     }
 
     private fun handleDownload(candidate: DownloadCandidate) {
@@ -210,9 +220,10 @@ class MainActivity : ComponentActivity() {
         val cleanFileName = (fileName ?: shareableUri.lastPathSegment ?: "app.apk").removeSuffix(".zip")
         val caller = viewModel.request?.callerPackage?.takeIf { it.isNotBlank() } ?: "app.morphe.manager"
 
-        if (isHelperInvocation()) {
+        if (callingActivity != null) {
             val resultIntent = Intent().apply {
                 data = shareableUri
+                clipData = ClipData.newUri(contentResolver, cleanFileName, shareableUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 putExtra(DownloadHelperContract.EXTRA_RESULT_FILE_NAME, cleanFileName)
                 viewModel.request?.packageName?.let {
@@ -221,9 +232,11 @@ class MainActivity : ComponentActivity() {
             }
             grantUriPermission(caller, shareableUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             setResult(Activity.RESULT_OK, resultIntent)
+            DownloadJobManager.clearPendingResult(this)
+            viewModel.cancelCompletionNotification()
             finish()
         } else {
-            sendApkToMorphe(shareableUri, cleanFileName)
+            viewModel.appendLog("Downloaded $cleanFileName successfully.")
         }
     }
 

@@ -461,8 +461,8 @@ private fun AuroraAccountDialog(
             httpClient = GPlayHttpClient(MorpheHttpClient.gplayClient)
         )
     }
-    val availableAccounts = remember(tokenProvider) {
-        tokenProvider.getAvailableAccounts()
+    var availableAccounts by remember(tokenProvider) {
+        mutableStateOf(tokenProvider.getAvailableAccounts())
     }
 
     val accountChooserLauncher = rememberLauncherForActivityResult(
@@ -470,6 +470,7 @@ private fun AuroraAccountDialog(
     ) { result ->
         val chosenAccountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
         val chosenAccountType = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_TYPE)
+            ?: MicroGAccountTokenProvider.REVANCED_ACCOUNT_TYPE
         if (!chosenAccountName.isNullOrBlank()) {
             isAuthenticating = true
             scope.launch {
@@ -483,7 +484,8 @@ private fun AuroraAccountDialog(
                             auroraTokenType = "AUTH"
                         )
                     )
-                    Toast.makeText(context, "Google account connected: $chosenAccountName", Toast.LENGTH_SHORT).show()
+                    availableAccounts = tokenProvider.getAvailableAccounts()
+                    Toast.makeText(context, "MicroG-RE account connected: $chosenAccountName", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     android.util.Log.e("AuroraAccount", "Auth error: ${e.message}", e)
                     Toast.makeText(context, "Auth error: ${e.message}", Toast.LENGTH_LONG).show()
@@ -609,7 +611,7 @@ private fun AuroraAccountDialog(
                     } else {
                         if (availableAccounts.isNotEmpty()) {
                             Text(
-                                text = "Detected device accounts:",
+                                text = "Detected MicroG-RE accounts:",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
@@ -633,6 +635,7 @@ private fun AuroraAccountDialog(
                                                             auroraTokenType = "AUTH"
                                                         )
                                                     )
+                                                    availableAccounts = tokenProvider.getAvailableAccounts()
                                                     Toast.makeText(context, "Connected: ${acc.name}", Toast.LENGTH_SHORT).show()
                                                 } catch (e: Exception) {
                                                     android.util.Log.e("AuroraAccount", "Auth error: ${e.message}", e)
@@ -657,7 +660,7 @@ private fun AuroraAccountDialog(
                                                 fontWeight = FontWeight.Medium
                                             )
                                             Text(
-                                                text = if (acc.type == MicroGAccountTokenProvider.REVANCED_ACCOUNT_TYPE) "MicroG-RE" else "Google Account",
+                                                text = "MicroG-RE",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -671,6 +674,19 @@ private fun AuroraAccountDialog(
                                     }
                                 }
                             }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Tap below to select your MicroG-RE account and grant Google Play token access.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
                         }
 
                         Row(
@@ -678,7 +694,7 @@ private fun AuroraAccountDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             HelperButton(
-                                text = "Other Account",
+                                text = if (availableAccounts.isEmpty()) "Select MicroG-RE Account" else "Other MicroG Account",
                                 onClick = {
                                     val intent = AccountManager.newChooseAccountIntent(
                                         null,
@@ -686,7 +702,7 @@ private fun AuroraAccountDialog(
                                         tokenProvider.getSupportedAccountTypes(),
                                         false,
                                         null,
-                                        null,
+                                        MicroGAccountTokenProvider.GOOGLE_PLAY_AUTH_TOKEN_TYPE,
                                         null,
                                         null
                                     )

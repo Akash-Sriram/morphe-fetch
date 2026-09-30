@@ -36,8 +36,8 @@ internal class MicroGAccountTokenProvider(
     companion object {
         private const val TAG = "MicroGTokenProvider"
         const val REVANCED_ACCOUNT_TYPE = "app.revanced"
-        const val GOOGLE_ACCOUNT_TYPE = "com.google"
-        val SUPPORTED_ACCOUNT_TYPES = arrayOf(REVANCED_ACCOUNT_TYPE, GOOGLE_ACCOUNT_TYPE)
+        const val OFFICIAL_MICROG_ACCOUNT_TYPE = "org.microg.gms"
+        val SUPPORTED_ACCOUNT_TYPES = arrayOf(REVANCED_ACCOUNT_TYPE, OFFICIAL_MICROG_ACCOUNT_TYPE)
         const val GOOGLE_PLAY_AUTH_TOKEN_TYPE = "oauth2:https://www.googleapis.com/auth/googleplay"
         const val PACKAGE_NAME_PLAY_STORE = "com.android.vending"
         const val DISPENSER_URL = "https://auroraoss.com/api/auth"
@@ -54,26 +54,14 @@ internal class MicroGAccountTokenProvider(
         cachedAuthData = null
     }
 
-    fun getSupportedAccountTypes(): Array<String> {
-        val accountManager = AccountManager.get(context)
-        val hasRevanced = runCatching { accountManager.getAccountsByType(REVANCED_ACCOUNT_TYPE) }
-            .getOrNull().orEmpty().isNotEmpty()
-        return if (hasRevanced) {
-            arrayOf(REVANCED_ACCOUNT_TYPE)
-        } else {
-            arrayOf(GOOGLE_ACCOUNT_TYPE)
-        }
-    }
+    fun getSupportedAccountTypes(): Array<String> = SUPPORTED_ACCOUNT_TYPES
 
     fun getAvailableAccounts(): List<Account> {
         val accountManager = AccountManager.get(context)
-        val revanced = runCatching { accountManager.getAccountsByType(REVANCED_ACCOUNT_TYPE) }
-            .getOrNull()?.toList().orEmpty()
-        if (revanced.isNotEmpty()) {
-            return revanced
+        return buildList {
+            addAll(runCatching { accountManager.getAccountsByType(REVANCED_ACCOUNT_TYPE) }.getOrNull().orEmpty())
+            addAll(runCatching { accountManager.getAccountsByType(OFFICIAL_MICROG_ACCOUNT_TYPE) }.getOrNull().orEmpty())
         }
-        return runCatching { accountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE) }
-            .getOrNull()?.toList().orEmpty()
     }
 
     suspend fun getAuthData(activity: Activity? = null): AuthData = withContext(Dispatchers.IO) {
@@ -220,7 +208,12 @@ internal class MicroGAccountTokenProvider(
                         }
                     } catch (e: Exception) {
                         if (continuation.isActive) {
-                            continuation.resumeWithException(e)
+                            val msg = if (e.message?.contains("UnregisteredOnApiConsole", ignoreCase = true) == true) {
+                                "Google Play Services does not permit direct login for third-party apps. Please stay with Anonymous session or use MicroG-RE."
+                            } else {
+                                e.message ?: "Authentication failed"
+                            }
+                            continuation.resumeWithException(IllegalStateException(msg, e))
                         }
                     }
                 }

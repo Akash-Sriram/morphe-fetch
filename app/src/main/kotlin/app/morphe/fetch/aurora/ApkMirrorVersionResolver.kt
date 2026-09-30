@@ -62,10 +62,10 @@ internal object ApkMirrorVersionResolver {
             !href.contains("-secondary", ignoreCase = true) &&
                 !href.contains("-wear", ignoreCase = true) &&
                 !href.contains("-tv", ignoreCase = true)
-        }?.absUrl("href") ?: releaseLinks.firstOrNull { link ->
+        }?.absUrl("href") ?: (if (requestedHasVariant) releaseLinks.firstOrNull { link ->
             val href = link.attr("href")
             href.contains("-release", ignoreCase = true) && !href.contains("/apk/apkmirror/", ignoreCase = true)
-        }?.absUrl("href") ?: return@withContext null
+        }?.absUrl("href") else null) ?: return@withContext null
 
         val releaseHtml = runCatching {
             val req = Request.Builder().url(releaseUrl).build()
@@ -77,9 +77,15 @@ internal object ApkMirrorVersionResolver {
         val releaseDoc = Jsoup.parse(releaseHtml, releaseUrl)
         val rows = releaseDoc.select("div.variants-table div.table-row")
         for (row in rows) {
+            val rowText = row.text()
+            val isSecondaryRow = rowText.contains("secondary", ignoreCase = true) ||
+                rowText.contains("wear", ignoreCase = true) ||
+                rowText.contains("android tv", ignoreCase = true)
+            if (isSecondaryRow && !requestedHasVariant) continue
+
             val firstCellText = row.select("div.table-cell").firstOrNull()?.text().orEmpty()
             val rowVersionCode = Regex("""\b(\d{6,11})\b""").find(firstCellText)?.groupValues?.get(1)?.toLongOrNull()
-                ?: Regex("""\b(\d{6,11})\b""").find(row.text())?.groupValues?.get(1)?.toLongOrNull()
+                ?: Regex("""\b(\d{6,11})\b""").find(rowText)?.groupValues?.get(1)?.toLongOrNull()
             if (rowVersionCode != null && rowVersionCode > 0L) {
                 cacheVersionCode(packageName, versionName, rowVersionCode)
                 Log.i(TAG, "Resolved versionCode=$rowVersionCode for $packageName $versionName from APKMirror")

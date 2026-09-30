@@ -171,7 +171,7 @@ internal fun CandidateInfoChips(request: HelperRequest, candidate: DownloadCandi
             MorpheStatusBadge(text = "Version $it", tone = versionTone)
         }
         if (candidate.versionCode != null) {
-            MorpheStatusBadge(text = "Code ${candidate.versionCode}", tone = versionCodeTone)
+            MorpheStatusBadge(text = "Build ${candidate.versionCode}", tone = versionCodeTone)
         }
         if (candidate.versionName == null && candidate.versionCode == null) {
             MorpheStatusBadge(text = candidate.versionDisplay, tone = versionTone)

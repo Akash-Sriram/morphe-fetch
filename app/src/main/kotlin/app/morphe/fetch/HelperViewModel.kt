@@ -48,9 +48,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     init {
         MorpheHttpClient.init(application)
         viewModelScope.launch(Dispatchers.IO) {
-            if (!ApkMirrorSessionWarmer.hasValidCfClearance()) {
-                ApkMirrorSessionWarmer.warmSessionSync(application)
-            }
+            MorpheHttpClient.initAsync(application)
         }
     }
 
@@ -134,7 +132,6 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         helperSettings = application.loadHelperSettings()
         viewModelScope.launch(Dispatchers.IO) {
             application.cleanupTemporaryDownloads(helperSettings)
-            runCatching { MorpheArchive.getOrFetchIndex() }
         }
         viewModelScope.launch {
             DownloadJobManager.events.collect(::handleDownloadEvent)
@@ -142,9 +139,29 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun handleIntent(intent: Intent) {
+        val isLauncherLaunch = intent.action == Intent.ACTION_MAIN ||
+            intent.categories?.contains(Intent.CATEGORY_LAUNCHER) == true
+        if (isLauncherLaunch) {
+            clearRequest()
+            DownloadJobManager.clearPendingResult(getApplication())
+            cancelCompletionNotification()
+            return
+        }
+
         requestIntentExtras = intent.extras ?: requestIntentExtras
         val newRequest = HelperRequest.from(intent)
         if (newRequest != null) {
+            if (request?.packageName != newRequest.packageName) {
+                reuseOffer = null
+                while (_finishEvents.tryReceive().isSuccess) {
+                    // Drain buffered finish events
+                }
+                val pending = DownloadJobManager.readPendingResult(getApplication())
+                if (pending != null && !pending.belongsTo(newRequest)) {
+                    DownloadJobManager.clearPendingResult(getApplication())
+                    cancelCompletionNotification()
+                }
+            }
             request = newRequest
             startRequestLog(newRequest)
             offerExistingDownloadIfPresent(newRequest)
@@ -221,6 +238,9 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         request = null
         uiState = UiState.Idle
         selectedPagerPage = 0
+        while (_finishEvents.tryReceive().isSuccess) {
+            // Drain buffered finish events
+        }
         AppLog.clear()
         AppLog.setRequestSummary(null)
     }
@@ -820,22 +840,28 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun deliverPendingResultIfPresent(activity: Activity): Boolean {
+        if (activity.callingActivity == null) return false
         val activeRequest = request ?: return false
         val context = getApplication<Application>()
         val pending = DownloadJobManager.readPendingResult(context) ?: return false
-        if (!pending.belongsTo(activeRequest)) return false
-        if (activity.callingActivity == null) return false
+        if (!pending.belongsTo(activeRequest)) {
+            DownloadJobManager.clearPendingResult(context)
+            cancelCompletionNotification()
+            return false
+        }
 
-        val uri = Uri.parse(pending.uri)
+        val shareableUri = Uri.parse(pending.uri)
         val result = Intent().apply {
-            data = uri
-            clipData = ClipData.newUri(activity.contentResolver, pending.fileName, uri)
+            data = shareableUri
+            clipData = ClipData.newUri(activity.contentResolver, pending.fileName, shareableUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             putExtra(DownloadHelperContract.EXTRA_RESULT_PACKAGE_NAME, pending.packageName)
             putExtra(DownloadHelperContract.EXTRA_RESULT_VERSION_NAME, pending.versionName)
             putExtra(DownloadHelperContract.EXTRA_RESULT_SOURCE_NAME, pending.sourceName)
             putExtra(DownloadHelperContract.EXTRA_RESULT_FILE_NAME, pending.fileName)
         }
+        val caller = activeRequest.callerPackage.takeIf { it.isNotBlank() } ?: "app.morphe.manager"
+        activity.grantUriPermission(caller, shareableUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         activity.setResult(Activity.RESULT_OK, result)
         appendLog("Delivered existing result for ${pending.packageName}.")
         DownloadJobManager.clearPendingResult(context)
@@ -844,7 +870,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         return true
     }
 
-    private fun cancelCompletionNotification() {
+    fun cancelCompletionNotification() {
         val context = getApplication<Application>()
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_DONE)
     }

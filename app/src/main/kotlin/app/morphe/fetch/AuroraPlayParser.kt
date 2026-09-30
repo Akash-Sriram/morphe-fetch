@@ -88,9 +88,28 @@ internal class AuroraPlayParser(
 
         when (option) {
             CandidateOption.REQUESTED -> {
-                var targetVersionCode: Long? = request.versionCode
-                    ?: request.requestedVersionCodes.firstOrNull()
+                // If Morphe Manager or the request provided explicit version codes, try purchasing them directly!
+                val candidateCodes = buildList {
+                    request.versionCode?.takeIf { it > 0L }?.let(::add)
+                    addAll(request.requestedVersionCodes.filter { it > 0L })
+                }.distinct()
 
+                for (code in candidateCodes) {
+                    val candidate = purchaseAndBuildCandidate(
+                        request = request,
+                        versionCode = code,
+                        versionName = request.requestedVersionName,
+                        option = CandidateOption.REQUESTED,
+                        gPlayClient = gPlayClient,
+                        authData = authData
+                    )
+                    if (candidate != null) {
+                        Log.i(TAG, "Purchased requested version code $code for ${request.packageName} directly from Morphe request")
+                        return@withContext listOf(candidate)
+                    }
+                }
+
+                var targetVersionCode: Long? = null
                 var resolvedVersionName: String? = request.requestedVersionName
 
                 // Try APKMirror cache if already discovered
@@ -117,20 +136,21 @@ internal class AuroraPlayParser(
                     try {
                         val details = AppDetailsHelper(authData).using(gPlayClient)
                             .getAppByPackageName(request.packageName)
-                        when {
-                            // Strict match: Play's latest version is exactly what was requested
-                            request.matchesRequestedVersion(details.versionName, details.versionCode) -> {
+                        val isVariant = details.versionName.contains("-secondary", ignoreCase = true) ||
+                            details.versionName.contains("-wear", ignoreCase = true) ||
+                            details.versionName.contains("-tv", ignoreCase = true)
+                        if (!isVariant || request.requestsVariantBuild) {
+                            if (request.hasRequestedVersionRequest) {
+                                if (request.matchesRequestedVersion(details.versionName, details.versionCode)) {
+                                    targetVersionCode = details.versionCode
+                                    resolvedVersionName = details.versionName
+                                }
+                            } else {
                                 targetVersionCode = details.versionCode
                                 resolvedVersionName = details.versionName
                             }
-                            // Fuzzy prefix match: e.g., requested "7.94.0.984908898" and Play has "7.94.x.y"
-                            // Both share the same major.minor — assume same effective version
-                            !request.requestedVersionName.isNullOrBlank() &&
-                            versionsShareMajorMinor(request.requestedVersionName!!, details.versionName) -> {
-                                Log.i(TAG, "Fuzzy version match: requested '${request.requestedVersionName}' ≈ Play '${details.versionName}' (vc=${details.versionCode}) for ${request.packageName}")
-                                targetVersionCode = details.versionCode
-                                resolvedVersionName = details.versionName
-                            }
+                        } else {
+                            Log.w(TAG, "Skipping Play details variant ${details.versionName} for ${request.packageName}")
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to query app details for ${request.packageName}", e)
@@ -157,8 +177,7 @@ internal class AuroraPlayParser(
                             if (isVariant && !request.requestsVariantBuild) {
                                 Log.d(TAG, "Skipping variant build ${match.version_name} from APKPure index for ${request.packageName}")
                             } else if (reqVName == null ||
-                                request.matchesRequestedVersion(match.version_name, match.version_code) ||
-                                versionsShareMajorMinor(reqVName, match.version_name)
+                                request.matchesRequestedVersion(match.version_name, match.version_code)
                             ) {
                                 Log.i(TAG, "Resolved version code via APKPure index: ${match.version_name} (vc=${match.version_code}) for ${request.packageName}")
                                 targetVersionCode = match.version_code
@@ -228,9 +247,14 @@ internal class AuroraPlayParser(
                         )
                         val match = resp.app_update_response.firstOrNull { it.package_name == request.packageName }
                         if (match != null && match.version_code > latestVersionCode) {
-                            Log.i(TAG, "Indexed newer version code for ${request.packageName}: ${match.version_name} (vc=${match.version_code} > Play vc=$latestVersionCode)")
-                            latestVersionCode = match.version_code
-                            latestVersionName = match.version_name
+                            val isVariant = match.version_name.contains("-secondary", ignoreCase = true) ||
+                                match.version_name.contains("-wear", ignoreCase = true) ||
+                                match.version_name.contains("-tv", ignoreCase = true)
+                            if (!isVariant || request.requestsVariantBuild) {
+                                Log.i(TAG, "Indexed newer version code for ${request.packageName}: ${match.version_name} (vc=${match.version_code} > Play vc=$latestVersionCode)")
+                                latestVersionCode = match.version_code
+                                latestVersionName = match.version_name
+                            }
                         }
                     } catch (e: Exception) {
                         Log.d(TAG, "Index check for newer version code skipped: ${e.message}")

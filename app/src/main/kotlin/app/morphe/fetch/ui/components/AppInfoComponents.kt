@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -180,11 +182,11 @@ internal fun AppInfoCard(
                 }
             }
 
-            // Compact chips row: Target Version | Architecture | Format
-            Row(
+            // Compact chips row: Target Version | Build Code | Architecture | Format
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 // Version badge
                 val versionText = request.requestedVersionName ?: "Any version"
@@ -193,6 +195,15 @@ internal fun AppInfoCard(
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                     contentColor = MaterialTheme.colorScheme.primary
                 )
+
+                // Build code badge
+                request.versionCodeSummary?.let { buildCode ->
+                    InfoBadge(
+                        label = "Build $buildCode",
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 // Architecture badge
                 val archText = request.availableAbis.firstOrNull() ?: "Default ABI"

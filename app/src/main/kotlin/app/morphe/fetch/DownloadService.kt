@@ -640,12 +640,16 @@ internal class DownloadService : Service() {
     }
 
     private fun notifyCompletion(job: DownloadJobManager.DownloadJob, result: PendingDownloadResult) {
+        val callerText = if (result.callerPackage.isNotBlank()) {
+            " · tap to return it to ${result.callerPackage}"
+        } else {
+            ""
+        }
         val notification = NotificationCompat.Builder(this, CHANNEL_DONE)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Download complete: ${job.candidate.name}")
             .setContentText(
-                "${job.candidate.versionDisplay} from ${job.candidate.source.label} · " +
-                    "tap to return it to ${result.callerPackage}"
+                "${job.candidate.versionDisplay} from ${job.candidate.source.label}$callerText"
             )
             .setContentIntent(requestContentIntent(job.requestIntentExtras))
             .setAutoCancel(true)
@@ -674,8 +678,13 @@ internal class DownloadService : Service() {
 
     private fun requestContentIntent(extras: Bundle?): PendingIntent {
         val launch = Intent(this, MainActivity::class.java).apply {
-            action = DownloadHelperContract.ACTION_DOWNLOAD_ORIGINAL_APK
-            extras?.let(::putExtras)
+            if (extras != null && extras.getString(DownloadHelperContract.EXTRA_PACKAGE_NAME) != null) {
+                action = DownloadHelperContract.ACTION_DOWNLOAD_ORIGINAL_APK
+                putExtras(extras)
+            } else {
+                action = Intent.ACTION_MAIN
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
         }
         return PendingIntent.getActivity(
             this,

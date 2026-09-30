@@ -136,12 +136,17 @@ internal object MorpheHttpClient {
     private var cacheDir: File? = null
 
     fun init(context: Context) {
-        appContext = context.applicationContext
+        val appCtx = context.applicationContext
+        appContext = appCtx
         if (cacheDir == null) {
-            cacheDir = File(context.cacheDir, "http_cache")
+            cacheDir = File(appCtx.cacheDir, "http_cache")
         }
+    }
+
+    fun initAsync(context: Context) {
+        val appCtx = context.applicationContext
         runCatching {
-            android.webkit.WebSettings.getDefaultUserAgent(context)
+            android.webkit.WebSettings.getDefaultUserAgent(appCtx)
         }.getOrNull()?.takeIf { it.isNotBlank() }?.let { ua ->
             browserUserAgent = sanitizeToChromeUserAgent(ua)
         }
