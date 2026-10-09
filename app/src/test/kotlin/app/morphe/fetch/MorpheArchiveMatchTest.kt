@@ -24,11 +24,19 @@ class MorpheArchiveMatchTest {
         name = "Twitter",
         patches = listOf("dynamic-color")
     )
+    private val facebook = ArchiveApp(
+        packageName = "com.facebook.katana",
+        name = "Facebook",
+        patches = listOf("De-Vanced Settings", "Remove ads"),
+        sources = listOf(
+            ArchiveSource(repo = "RookieEnough/De-Vanced")
+        )
+    )
 
     @Before
     fun setUp() {
         MorpheArchive.cachedIndex = MorpheArchiveIndex(
-            apps = listOf(youtube, ytMusic, twitter)
+            apps = listOf(youtube, ytMusic, twitter, facebook)
         )
     }
 
@@ -75,5 +83,60 @@ class MorpheArchiveMatchTest {
     fun `findBestMatch returns null for unknown package query with dot`() {
         val match = MorpheArchive.findBestMatch("org.videolan.vlc")
         assertNull(match)
+    }
+
+    @Test
+    fun `searchCatalog matches apps by source repository name like de-vance`() {
+        val results = MorpheArchive.searchCatalog("de-vance")
+        assertEquals(1, results.size)
+        assertEquals("Facebook", results.first().name)
+    }
+
+    @Test
+    fun `searchCatalog matches apps by patch name like sponsorblock`() {
+        val results = MorpheArchive.searchCatalog("sponsorblock")
+        assertEquals(1, results.size)
+        assertEquals("YouTube", results.first().name)
+    }
+
+    @Test
+    fun `matchingReason identifies source repo match when app name does not match`() {
+        val reason = facebook.matchingReason("de-vance")
+        assertEquals(MatchReason.SourceRepo("RookieEnough/De-Vanced"), reason)
+    }
+
+    @Test
+    fun `matchingReason identifies patch match when app name does not match`() {
+        val reason = youtube.matchingReason("sponsorblock")
+        assertEquals(MatchReason.Patch("sponsorblock"), reason)
+    }
+
+    @Test
+    fun `matchingReason returns null when app name matches directly`() {
+        val reason = youtube.matchingReason("youtube")
+        assertNull(reason)
+    }
+
+    @Test
+    fun `searchSources matches repo by name and repo slug`() {
+        val devancedSource = ArchiveSource(
+            name = "De-Vanced",
+            repo = "RookieEnough/De-Vanced",
+            patchCount = 75,
+            apps = listOf(ArchiveSourceApp(name = "Facebook", packageName = "com.facebook.katana"))
+        )
+        MorpheArchive.cachedIndex = MorpheArchiveIndex(
+            apps = listOf(facebook),
+            repos = listOf(devancedSource)
+        )
+
+        val results = MorpheArchive.searchSources("de-vance")
+        assertEquals(1, results.size)
+        assertEquals("De-Vanced", results.first().name)
+        assertEquals("RookieEnough/De-Vanced", results.first().repo)
+
+        val resultsByAuthor = MorpheArchive.searchSources("rookie")
+        assertEquals(1, resultsByAuthor.size)
+        assertEquals("De-Vanced", resultsByAuthor.first().name)
     }
 }

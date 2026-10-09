@@ -3,6 +3,7 @@ package app.morphe.fetch
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import java.util.Locale
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -111,7 +112,7 @@ internal fun AppSearchBar(
         ),
         placeholder = {
             Text(
-                "Search apps or packages",
+                "Search apps, patches, or sources (e.g. De-Vanced)",
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
         },
@@ -191,6 +192,7 @@ internal fun AppBrowserRow(
     favourite: Boolean,
     installed: Boolean = false,
     selected: Boolean = false,
+    searchQuery: String = "",
     onToggleFavourite: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -251,6 +253,40 @@ internal fun AppBrowserRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                val matchReason = remember(app, searchQuery) {
+                    if (searchQuery.isNotBlank()) app.matchingReason(searchQuery) else null
+                }
+                if (matchReason != null) {
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        when (matchReason) {
+                            is MatchReason.SourceRepo -> {
+                                MorpheStatusBadge(
+                                    text = "Source: ${matchReason.repo}",
+                                    icon = Icons.Outlined.Extension,
+                                    tone = SemanticTone.Primary
+                                )
+                            }
+                            is MatchReason.Patch -> {
+                                MorpheStatusBadge(
+                                    text = "Patch: ${matchReason.patchName}",
+                                    icon = Icons.Outlined.Extension,
+                                    tone = SemanticTone.Warning
+                                )
+                            }
+                            is MatchReason.Description -> {
+                                MorpheStatusBadge(
+                                    text = "Patch: ${matchReason.patchName}",
+                                    icon = Icons.Outlined.Extension,
+                                    tone = SemanticTone.Neutral
+                                )
+                            }
+                        }
+                    }
+                }
                 Row(
                     modifier = Modifier.padding(top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -345,6 +381,7 @@ internal fun openAddSource(context: Context, addUrl: String) {
 @Composable
 internal fun AppDetailView(
     app: ArchiveApp,
+    searchQuery: String = "",
     onBack: () -> Unit,
     onGetApk: ((packageName: String, appName: String) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -462,8 +499,16 @@ internal fun AppDetailView(
                 MorpheSectionTitle(text = "Sources", icon = Icons.Outlined.Extension)
             }
             items(sortedSources, key = { it.repo }) { source ->
+                val autoExpand = remember(source.repo, searchQuery) {
+                    if (searchQuery.isNotBlank()) {
+                        val q = searchQuery.trim().lowercase(Locale.US)
+                        source.repo.lowercase(Locale.US).contains(q) ||
+                            source.patches.any { it.name.lowercase(Locale.US).contains(q) }
+                    } else false
+                }
                 AppSourceCard(
                     source = source,
+                    initiallyExpanded = autoExpand,
                     onOpenUrl = openUrl,
                     onAddToMorphe = { openAddSource(context, it) }
                 )
@@ -475,10 +520,11 @@ internal fun AppDetailView(
 @Composable
 internal fun AppSourceCard(
     source: ArchiveSource,
+    initiallyExpanded: Boolean = false,
     onOpenUrl: (String) -> Unit,
     onAddToMorphe: (String) -> Unit
 ) {
-    var expanded by remember(source.repo) { mutableStateOf(false) }
+    var expanded by remember(source.repo, initiallyExpanded) { mutableStateOf(initiallyExpanded) }
     val colors = MaterialTheme.colorScheme
     SettingsItemCard(
         onClick = null,
@@ -629,3 +675,211 @@ internal fun AppSourceCard(
         }
     }
 }
+
+@Composable
+internal fun SourceBrowserCard(
+    source: ArchiveSource,
+    searchQuery: String = "",
+    onOpenUrl: (String) -> Unit,
+    onAddToMorphe: (String) -> Unit,
+    onSelectApp: ((ArchiveSourceApp) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+
+    SurfaceCard(
+        modifier = modifier,
+        onClick = { expanded = !expanded },
+        cornerRadius = 14.dp,
+        color = colors.surfaceColorAtElevation(3.dp),
+        borderWidth = 0.dp,
+        borderColor = colors.outlineVariant
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AsyncAvatar(
+                    url = source.avatarUrl,
+                    fallbackText = source.displayName.take(1).uppercase(Locale.US),
+                    size = 40.dp,
+                    cornerRadius = 10.dp
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = source.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = source.repo,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                        contentDescription = if (expanded) "Collapse" else "Expand",
+                        tint = colors.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Stats row (patches and apps count)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MorpheStatusBadge(
+                    text = "${source.actualPatchCount} patches",
+                    icon = Icons.Outlined.Extension,
+                    tone = SemanticTone.Primary
+                )
+                if (source.actualAppCount > 0) {
+                    MorpheStatusBadge(
+                        text = "${source.actualAppCount} apps",
+                        icon = Icons.Outlined.Layers,
+                        tone = SemanticTone.Neutral
+                    )
+                }
+            }
+
+            // Action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                source.addUrl?.takeIf { it.isNotBlank() }?.let { addUrl ->
+                    MorphePillButton(
+                        onClick = { onAddToMorphe(addUrl) },
+                        icon = Icons.Outlined.Add,
+                        contentDescription = "Add to Morphe",
+                        label = "Add to Morphe",
+                        tone = SemanticTone.Primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                source.webUrl?.takeIf { it.isNotBlank() }?.let { webUrl ->
+                    MorphePillButton(
+                        onClick = { onOpenUrl(webUrl) },
+                        icon = Icons.AutoMirrored.Outlined.OpenInNew,
+                        contentDescription = "GitHub",
+                        label = "GitHub",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            // Expanded: Compatible Apps List
+            AnimatedExpand(visible = expanded) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MorpheDivider()
+                    Text(
+                        text = "Compatible Apps (${source.apps.size})",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onSurface
+                    )
+                    if (source.apps.isEmpty()) {
+                        Text(
+                            text = "No individual apps mapped for this source.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant
+                        )
+                    } else {
+                        val longList = source.apps.size > 6
+                        val appsScroll = rememberScrollState()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = if (longList) 260.dp else Dp.Unspecified)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(if (longList) Modifier.verticalScroll(appsScroll) else Modifier),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                source.apps.forEach { appItem ->
+                                    Surface(
+                                        onClick = { onSelectApp?.invoke(appItem) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = colors.surfaceVariant.copy(alpha = 0.5f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            AsyncAvatar(
+                                                url = appItem.iconUrl,
+                                                fallbackText = appItem.name.take(1).uppercase(Locale.US),
+                                                size = 28.dp,
+                                                cornerRadius = 6.dp
+                                            )
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = appItem.name,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = colors.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = appItem.packageName,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = colors.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            if (appItem.patchCount > 0) {
+                                                Text(
+                                                    text = "${appItem.patchCount} patches",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = colors.primary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (longList) {
+                                ScrollStateScrollbar(
+                                    scrollState = appsScroll,
+                                    modifier = Modifier.fillMaxHeight()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

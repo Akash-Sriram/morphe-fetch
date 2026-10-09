@@ -283,11 +283,13 @@ internal fun EmptyLaunchState(
         keyboardController?.hide()
     }
 
+    val context = LocalContext.current
+
     LaunchedEffect(Unit) {
         if (MorpheArchive.cachedIndex == null) {
             isCatalogLoading = true
             withContext(Dispatchers.IO) {
-                MorpheArchive.getOrFetchIndex()
+                MorpheArchive.getOrFetchIndex(context)
             }
             isCatalogLoading = false
         }
@@ -300,11 +302,13 @@ internal fun EmptyLaunchState(
             suggestions = emptyList()
             return@LaunchedEffect
         }
-        delay(100)
-        val results = withContext(Dispatchers.IO) {
+        delay(60)
+        val results = withContext(Dispatchers.Default) {
             if (MorpheArchive.cachedIndex == null) {
                 isCatalogLoading = true
-                MorpheArchive.getOrFetchIndex()
+                withContext(Dispatchers.IO) {
+                    MorpheArchive.getOrFetchIndex(context)
+                }
                 isCatalogLoading = false
             }
             MorpheArchive.searchCatalog(query).take(30)
@@ -553,13 +557,32 @@ internal fun EmptyLaunchState(
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
-                                            Text(
-                                                text = app.packageName,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
+                                            val matchReason = remember(app, searchQuery) {
+                                                if (searchQuery.isNotBlank()) app.matchingReason(searchQuery) else null
+                                            }
+                                            if (matchReason != null) {
+                                                val badgeText = when (matchReason) {
+                                                    is MatchReason.SourceRepo -> "Source: ${matchReason.repo}"
+                                                    is MatchReason.Patch -> "Patch: ${matchReason.patchName}"
+                                                    is MatchReason.Description -> "Patch: ${matchReason.patchName}"
+                                                }
+                                                Text(
+                                                    text = badgeText,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = app.packageName,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
                                         }
                                         if (app.patchCount > 0) {
                                             Surface(

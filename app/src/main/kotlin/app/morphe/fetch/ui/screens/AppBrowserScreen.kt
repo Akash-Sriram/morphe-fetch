@@ -1,5 +1,7 @@
 package app.morphe.fetch
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -67,6 +70,7 @@ internal fun AppBrowserScreen(
 ) {
     val isExpanded = isExpandedScreen()
     var apps by remember { mutableStateOf<List<ArchiveApp>?>(null) }
+    var sources by remember { mutableStateOf<List<ArchiveSource>?>(null) }
     var freshness by remember { mutableStateOf<ArchiveFreshness?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
@@ -90,14 +94,30 @@ internal fun AppBrowserScreen(
     }
 
     LaunchedEffect(loadKey) {
-        apps = null
         error = null
+        val cached = MorpheArchive.cachedIndex ?: withContext(Dispatchers.IO) {
+            MorpheArchive.loadFromDisk(context)
+        }
+        if (cached != null) {
+            apps = cached.apps.sortedBy { it.name.lowercase(Locale.US) }
+            sources = cached.repos.sortedBy { it.displayName.lowercase(Locale.US) }
+            freshness = archiveFreshness(cached.generatedAt)
+        } else {
+            apps = null
+            sources = null
+        }
+
         try {
-            val index = MorpheArchive.fetchIndex()
+            val index = withContext(Dispatchers.IO) {
+                MorpheArchive.fetchIndex(context, forceNetwork = (loadKey > 0 || cached == null))
+            }
             apps = index.apps.sortedBy { it.name.lowercase(Locale.US) }
+            sources = index.repos.sortedBy { it.displayName.lowercase(Locale.US) }
             freshness = archiveFreshness(index.generatedAt)
         } catch (e: Exception) {
-            error = e.message ?: "Failed to load the app index"
+            if (apps == null && sources == null) {
+                error = e.message ?: "Failed to load the archive index"
+            }
         }
     }
 
@@ -111,38 +131,92 @@ internal fun AppBrowserScreen(
         }
     }
 
-    val filtered = remember(apps, query, tab, sort, favourites, installedPackages) {
-        val loaded = apps ?: return@remember emptyList()
-        loaded
-            .filter { app ->
-                query.isBlank() ||
-                    app.name.contains(query, ignoreCase = true) ||
-                    app.packageName.contains(query, ignoreCase = true)
-            }
-            .filter { app ->
-                when (tab) {
-                    AppListTab.All -> true
-                    AppListTab.Favourites -> app.packageName in favourites
-                    AppListTab.Installed -> app.packageName in installedPackages
-                    AppListTab.NotInstalled -> app.packageName !in installedPackages
+    var filteredApps by remember { mutableStateOf<List<ArchiveApp>>(emptyList()) }
+    var filteredSources by remember { mutableStateOf<List<ArchiveSource>>(emptyList()) }
+    var matchingSourcesForSearch by remember { mutableStateOf<List<ArchiveSource>>(emptyList()) }
+
+    LaunchedEffect(apps, sources, query, tab, sort, favourites, installedPackages) {
+        val loadedApps = apps
+        val loadedSources = sources
+        if (loadedApps == null && loadedSources == null) {
+            filteredApps = emptyList()
+            filteredSources = emptyList()
+            matchingSourcesForSearch = emptyList()
+            return@LaunchedEffect
+        }
+        val q = query.trim()
+        if (q.isNotEmpty()) {
+            delay(50)
+        }
+        withContext(Dispatchers.Default) {
+            val qLower = q.lowercase(Locale.US)
+
+            // Sources filtering & ranking
+            val matchedSources = (loadedSources ?: emptyList())
+                .filter { q.isBlank() || it.matchesQuery(qLower) }
+                .let { sList ->
+                    if (q.isNotBlank()) {
+                        sList.sortedWith(
+                            compareByDescending<ArchiveSource> { it.scoreMatch(qLower) }
+                                .thenByDescending { it.actualPatchCount }
+                        )
+                    } else {
+                        when (sort) {
+                            AppSort.AZ -> sList.sortedBy { it.displayName.lowercase(Locale.US) }
+                            AppSort.ZA -> sList.sortedByDescending { it.displayName.lowercase(Locale.US) }
+                            AppSort.Sources, AppSort.Newest -> sList.sortedByDescending { it.actualPatchCount }
+                        }
+                    }
                 }
+            filteredSources = matchedSources
+            matchingSourcesForSearch = if (q.isNotBlank()) matchedSources else emptyList()
+
+            // Apps filtering & ranking
+            val matchedApps = if (tab == AppListTab.Sources) {
+                emptyList()
+            } else {
+                (loadedApps ?: emptyList())
+                    .filter { app ->
+                        q.isBlank() || app.matchesQuery(qLower)
+                    }
+                    .filter { app ->
+                        when (tab) {
+                            AppListTab.All -> true
+                            AppListTab.Sources -> false
+                            AppListTab.Favourites -> app.packageName in favourites
+                            AppListTab.Installed -> app.packageName in installedPackages
+                            AppListTab.NotInstalled -> app.packageName !in installedPackages
+                        }
+                    }
+                    .let { matches ->
+                        if (q.isNotBlank()) {
+                            matches
+                                .map { it to it.scoreMatch(qLower) }
+                                .sortedWith(
+                                    compareByDescending<Pair<ArchiveApp, Int>> { it.second }
+                                        .thenByDescending { it.first.patchCount }
+                                )
+                                .map { it.first }
+                        } else {
+                            when (sort) {
+                                AppSort.AZ -> matches.sortedBy { it.name.lowercase(Locale.US) }
+                                AppSort.ZA -> matches.sortedByDescending { it.name.lowercase(Locale.US) }
+                                AppSort.Sources -> matches.sortedByDescending { it.sourceCount }
+                                AppSort.Newest -> matches
+                                    .map { app -> app.newestReleaseDate().orEmpty() to app }
+                                    .sortedByDescending { it.first }
+                                    .map { it.second }
+                            }
+                        }
+                    }
             }
-            .let { matches ->
-                when (sort) {
-                    AppSort.AZ -> matches.sortedBy { it.name.lowercase(Locale.US) }
-                    AppSort.ZA -> matches.sortedByDescending { it.name.lowercase(Locale.US) }
-                    AppSort.Sources -> matches.sortedByDescending { it.sourceCount }
-                    AppSort.Newest -> matches
-                        .map { app -> app.newestReleaseDate().orEmpty() to app }
-                        .sortedByDescending { it.first }
-                        .map { it.second }
-                }
-            }
+            filteredApps = matchedApps
+        }
     }
 
-    LaunchedEffect(isExpanded, filtered) {
-        if (isExpanded && selected == null && filtered.isNotEmpty()) {
-            selected = filtered.first()
+    LaunchedEffect(isExpanded, filteredApps) {
+        if (isExpanded && selected == null && filteredApps.isNotEmpty()) {
+            selected = filteredApps.first()
         }
     }
 
@@ -173,7 +247,11 @@ internal fun AppBrowserScreen(
                 val fresh = freshness
                 Text(
                     text = buildString {
-                        append(apps?.let { "${it.size} apps with patches" } ?: "Morphe patch archive")
+                        if (tab == AppListTab.Sources) {
+                            append(sources?.let { "${it.size} patch sources" } ?: "Morphe patch sources")
+                        } else {
+                            append(apps?.let { "${it.size} apps with patches" } ?: "Morphe patch archive")
+                        }
                         fresh?.let { append(" · index ${it.label}") }
                     },
                     color = if (fresh?.stale == true) {
@@ -202,18 +280,32 @@ internal fun AppBrowserScreen(
             )
         }
 
+        val openSourceIntent: (String) -> Unit = remember(context) {
+            { url ->
+                runCatching {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                }
+            }
+        }
+
         val masterList = @Composable { paneModifier: Modifier ->
             MasterListPane(
                 query = query,
                 onQueryChange = { query = it },
                 apps = apps,
+                sources = sources,
                 error = error,
                 onRetry = { loadKey++ },
                 tab = tab,
                 onTabSelect = { tab = it },
                 sort = sort,
                 onSortSelect = { sort = it },
-                filtered = filtered,
+                filteredApps = filteredApps,
+                filteredSources = filteredSources,
+                matchingSourcesForSearch = matchingSourcesForSearch,
                 favourites = favourites,
                 installedPackages = installedPackages,
                 selected = selected,
@@ -225,6 +317,8 @@ internal fun AppBrowserScreen(
                     }
                 },
                 onSelectApp = { selected = it },
+                onOpenSourceUrl = openSourceIntent,
+                onAddToMorphe = openSourceIntent,
                 onScrollToTop = {
                     scope.launch { listState.animateScrollToItem(0) }
                 },
@@ -259,6 +353,7 @@ internal fun AppBrowserScreen(
                     if (current != null) {
                         AppDetailView(
                             app = current,
+                            searchQuery = query,
                             onBack = { selected = null },
                             onGetApk = onGetApk,
                             modifier = Modifier.fillMaxSize()
@@ -314,6 +409,7 @@ internal fun AppBrowserScreen(
             if (current != null) {
                 AppDetailView(
                     app = current,
+                    searchQuery = query,
                     onBack = { selected = null },
                     onGetApk = onGetApk,
                     modifier = Modifier.weight(1f)
@@ -330,13 +426,16 @@ private fun MasterListPane(
     query: String,
     onQueryChange: (String) -> Unit,
     apps: List<ArchiveApp>?,
+    sources: List<ArchiveSource>?,
     error: String?,
     onRetry: () -> Unit,
     tab: AppListTab,
     onTabSelect: (AppListTab) -> Unit,
     sort: AppSort,
     onSortSelect: (AppSort) -> Unit,
-    filtered: List<ArchiveApp>,
+    filteredApps: List<ArchiveApp>,
+    filteredSources: List<ArchiveSource>,
+    matchingSourcesForSearch: List<ArchiveSource>,
     favourites: Set<String>,
     installedPackages: Set<String>,
     selected: ArchiveApp?,
@@ -344,6 +443,8 @@ private fun MasterListPane(
     listState: LazyListState,
     onToggleFavourite: (String) -> Unit,
     onSelectApp: (ArchiveApp) -> Unit,
+    onOpenSourceUrl: (String) -> Unit,
+    onAddToMorphe: (String) -> Unit,
     onScrollToTop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -356,7 +457,7 @@ private fun MasterListPane(
             onQueryChange = onQueryChange
         )
 
-        val loaded = apps
+        val loaded = apps != null || sources != null
         when {
             error != null -> {
                 InfoCard(error)
@@ -367,7 +468,7 @@ private fun MasterListPane(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-            loaded == null -> {
+            !loaded -> {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
@@ -379,7 +480,7 @@ private fun MasterListPane(
                     )
                     Spacer(Modifier.width(MorpheDefaults.ContentPaddingSmall))
                     Text(
-                        "Loading app index…",
+                        "Loading archive index…",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -392,70 +493,186 @@ private fun MasterListPane(
                     onSortSelect = onSortSelect
                 )
 
-                if (filtered.isEmpty()) {
-                    InfoCard(
-                        when (tab) {
-                            AppListTab.Favourites ->
-                                "No liked apps yet. Tap the heart on any app to pin it here."
-                            AppListTab.Installed -> "No patched apps in the index are installed."
-                            AppListTab.NotInstalled ->
-                                "Every app in the index is installed on this device."
-                            AppListTab.All -> "No apps match \"$query\"."
-                        }
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    ) {
-                        Row(modifier = Modifier.fillMaxSize()) {
-                            LazyColumn(
-                                state = listState,
+                if (tab == AppListTab.Sources) {
+                    if (filteredSources.isEmpty()) {
+                        InfoCard("No patch sources match \"$query\".")
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        ) {
+                            Row(modifier = Modifier.fillMaxSize()) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    contentPadding = PaddingValues(bottom = 64.dp),
+                                    verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                                ) {
+                                    items(filteredSources, key = { it.repo }) { source ->
+                                        SourceBrowserCard(
+                                            source = source,
+                                            searchQuery = query,
+                                            onOpenUrl = onOpenSourceUrl,
+                                            onAddToMorphe = onAddToMorphe,
+                                            onSelectApp = { appItem ->
+                                                val match = apps?.firstOrNull { it.packageName == appItem.packageName }
+                                                    ?: ArchiveApp(name = appItem.name, packageName = appItem.packageName)
+                                                onSelectApp(match)
+                                            },
+                                            modifier = Modifier.animatedListItem(this)
+                                        )
+                                    }
+                                }
+                                LazyListScrollbar(
+                                    listState = listState,
+                                    modifier = Modifier.fillMaxHeight()
+                                )
+                            }
+                            val showFab by remember {
+                                derivedStateOf { listState.firstVisibleItemIndex > 0 }
+                            }
+                            MorpheFab(
+                                visible = showFab,
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                                contentPadding = PaddingValues(bottom = 64.dp),
-                                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                                    .align(Alignment.BottomEnd)
+                                    .padding(end = 24.dp, bottom = 20.dp)
                             ) {
-                                items(filtered, key = { it.packageName }) { app ->
-                                    AppBrowserRow(
-                                        app = app,
-                                        favourite = app.packageName in favourites,
-                                        installed = app.packageName in installedPackages,
-                                        selected = (isExpanded && selected?.packageName == app.packageName),
-                                        onToggleFavourite = { onToggleFavourite(app.packageName) },
-                                        onClick = { onSelectApp(app) },
-                                        modifier = Modifier.animatedListItem(this)
+                                Surface(
+                                    onClick = onScrollToTop,
+                                    shape = CircleShape,
+                                    color = SemanticTone.Primary.container,
+                                    contentColor = SemanticTone.Primary.content
+                                ) {
+                                    ThemedIcon(
+                                        icon = Icons.Outlined.KeyboardArrowUp,
+                                        contentDescription = "Go to top",
+                                        tint = SemanticTone.Primary.content,
+                                        modifier = Modifier.padding(12.dp)
                                     )
                                 }
                             }
-                            LazyListScrollbar(
-                                listState = listState,
-                                modifier = Modifier.fillMaxHeight()
-                            )
                         }
-                        val showFab by remember {
-                            derivedStateOf { listState.firstVisibleItemIndex > 0 }
-                        }
-                        MorpheFab(
-                            visible = showFab,
+                    }
+                } else {
+                    val hasSources = query.isNotBlank() && matchingSourcesForSearch.isNotEmpty()
+                    if (filteredApps.isEmpty() && !hasSources) {
+                        InfoCard(
+                            when (tab) {
+                                AppListTab.Favourites ->
+                                    "No liked apps yet. Tap the heart on any app to pin it here."
+                                AppListTab.Installed -> "No patched apps in the index are installed."
+                                AppListTab.NotInstalled ->
+                                    "Every app in the index is installed on this device."
+                                else -> "No apps match \"$query\"."
+                            }
+                        )
+                    } else {
+                        Box(
                             modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(end = 24.dp, bottom = 20.dp)
+                                .weight(1f)
+                                .fillMaxWidth()
                         ) {
-                            Surface(
-                                onClick = onScrollToTop,
-                                shape = CircleShape,
-                                color = SemanticTone.Primary.container,
-                                contentColor = SemanticTone.Primary.content
-                            ) {
-                                ThemedIcon(
-                                    icon = Icons.Outlined.KeyboardArrowUp,
-                                    contentDescription = "Go to top",
-                                    tint = SemanticTone.Primary.content,
-                                    modifier = Modifier.padding(12.dp)
+                            Row(modifier = Modifier.fillMaxSize()) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    contentPadding = PaddingValues(bottom = 64.dp),
+                                    verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                                ) {
+                                    if (hasSources) {
+                                        item(key = "header_sources") {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Matching Sources (${matchingSourcesForSearch.size})",
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    text = "View all in Sources tab",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                        items(matchingSourcesForSearch.take(4), key = { "src_${it.repo}" }) { source ->
+                                            SourceBrowserCard(
+                                                source = source,
+                                                searchQuery = query,
+                                                onOpenUrl = onOpenSourceUrl,
+                                                onAddToMorphe = onAddToMorphe,
+                                                onSelectApp = { appItem ->
+                                                    val match = apps?.firstOrNull { it.packageName == appItem.packageName }
+                                                        ?: ArchiveApp(name = appItem.name, packageName = appItem.packageName)
+                                                    onSelectApp(match)
+                                                },
+                                                modifier = Modifier.animatedListItem(this)
+                                            )
+                                        }
+                                        if (filteredApps.isNotEmpty()) {
+                                            item(key = "header_apps") {
+                                                Text(
+                                                    text = "Matching Apps (${filteredApps.size})",
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    items(filteredApps, key = { it.packageName }) { app ->
+                                        AppBrowserRow(
+                                            app = app,
+                                            favourite = app.packageName in favourites,
+                                            installed = app.packageName in installedPackages,
+                                            selected = (isExpanded && selected?.packageName == app.packageName),
+                                            searchQuery = query,
+                                            onToggleFavourite = { onToggleFavourite(app.packageName) },
+                                            onClick = { onSelectApp(app) },
+                                            modifier = Modifier.animatedListItem(this)
+                                        )
+                                    }
+                                }
+                                LazyListScrollbar(
+                                    listState = listState,
+                                    modifier = Modifier.fillMaxHeight()
                                 )
+                            }
+                            val showFab by remember {
+                                derivedStateOf { listState.firstVisibleItemIndex > 0 }
+                            }
+                            MorpheFab(
+                                visible = showFab,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(end = 24.dp, bottom = 20.dp)
+                            ) {
+                                Surface(
+                                    onClick = onScrollToTop,
+                                    shape = CircleShape,
+                                    color = SemanticTone.Primary.container,
+                                    contentColor = SemanticTone.Primary.content
+                                ) {
+                                    ThemedIcon(
+                                        icon = Icons.Outlined.KeyboardArrowUp,
+                                        contentDescription = "Go to top",
+                                        tint = SemanticTone.Primary.content,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
                             }
                         }
                     }

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.SortByAlpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +28,7 @@ internal enum class AppListTab(
     val contentDescription: String
 ) {
     All("All", Icons.AutoMirrored.Outlined.ViewList, "All"),
+    Sources("Sources", Icons.Outlined.Layers, "Patch Sources"),
     Favourites("Liked", Icons.Outlined.FavoriteBorder, "Liked"),
     Installed("Installed", Icons.Outlined.CheckCircle, "Installed"),
     NotInstalled("Not installed", Icons.Outlined.Block, "Not installed")

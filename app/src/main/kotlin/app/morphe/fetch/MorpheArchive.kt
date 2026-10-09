@@ -1,7 +1,9 @@
 package app.morphe.fetch
 
+import android.content.Context
 import android.util.Log
 import com.google.gson.annotations.SerializedName
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,9 +24,17 @@ import java.util.concurrent.TimeUnit
  * Apps" browser. The index is deliberately NOT cached: every open fetches the
  * current JSON live so the list always reflects the archive right now.
  */
+internal sealed interface MatchReason {
+    data class SourceRepo(val repo: String) : MatchReason
+    data class Patch(val patchName: String) : MatchReason
+    data class Description(val patchName: String, val snippet: String) : MatchReason
+}
+
 internal data class MorpheArchiveData(
     @SerializedName("generatedAt") val generatedAt: String? = null,
-    @SerializedName("apps") val apps: List<ArchiveApp> = emptyList()
+    @SerializedName("apps") val apps: List<ArchiveApp> = emptyList(),
+    @SerializedName("universalSources") val universalSources: List<ArchiveSource> = emptyList(),
+    @SerializedName("repos") val repos: List<ArchiveSource> = emptyList()
 )
 
 /**
@@ -34,7 +44,9 @@ internal data class MorpheArchiveData(
  */
 internal data class MorpheArchiveIndex(
     val generatedAt: String? = null,
-    val apps: List<ArchiveApp> = emptyList()
+    val apps: List<ArchiveApp> = emptyList(),
+    val universalSources: List<ArchiveSource> = emptyList(),
+    val repos: List<ArchiveSource> = emptyList()
 )
 
 internal data class ArchiveApp(
@@ -50,9 +62,114 @@ internal data class ArchiveApp(
     val patchCount: Int
         get() = patches.size
 
-    /** Number of distinct source repos/bundles offering patches for this app. */
     val sourceCount: Int
         get() = sources.size
+
+    @Transient
+    private var isIndexed: Boolean = false
+
+    @Transient
+    var nameLower: String = ""
+        private set
+
+    @Transient
+    var packageLower: String = ""
+        private set
+
+    @Transient
+    var sourceReposLower: List<String> = emptyList()
+        private set
+
+    @Transient
+    var patchNamesLower: List<String> = emptyList()
+        private set
+
+    @Transient
+    var searchBlob: String = ""
+        private set
+
+    fun ensureSearchIndex(): ArchiveApp {
+        if (!isIndexed) {
+            nameLower = name.lowercase(Locale.US)
+            packageLower = packageName.lowercase(Locale.US)
+            sourceReposLower = sources.map { it.repo.lowercase(Locale.US) }
+            patchNamesLower = patches.map { it.lowercase(Locale.US) }
+            val detailsNames = patchDetails.map { it.name.lowercase(Locale.US) }
+            val detailsDesc = patchDetails.mapNotNull { it.description?.lowercase(Locale.US) }
+            searchBlob = buildString {
+                append(nameLower).append(' ')
+                append(packageLower).append(' ')
+                sourceReposLower.forEach { append(it).append(' ') }
+                patchNamesLower.forEach { append(it).append(' ') }
+                detailsNames.forEach { append(it).append(' ') }
+                detailsDesc.forEach { append(it).append(' ') }
+            }
+            isIndexed = true
+        }
+        return this
+    }
+
+    /**
+     * Checks if the app matches [query] across name, package, patch names, source repos, or patch descriptions.
+     */
+    fun matchesQuery(query: String): Boolean {
+        if (query.isBlank()) return true
+        ensureSearchIndex()
+        val q = query.trim().lowercase(Locale.US)
+        return searchBlob.contains(q)
+    }
+
+    /**
+     * Computes a relevance score in O(1) for sorting without string allocations.
+     */
+    fun scoreMatch(queryLower: String): Int {
+        ensureSearchIndex()
+        return when {
+            nameLower.startsWith(queryLower) -> 1000
+            packageLower.startsWith(queryLower) -> 800
+            nameLower.contains(queryLower) -> 600
+            packageLower.contains(queryLower) -> 400
+            sourceReposLower.any { it.contains(queryLower) } -> 300
+            patchNamesLower.any { it.contains(queryLower) } -> 200
+            else -> 100
+        }
+    }
+
+    /**
+     * Determines the specific reason an app matched [query] when it wasn't a direct app name / package match.
+     */
+    fun matchingReason(query: String): MatchReason? {
+        val q = query.trim().lowercase(Locale.US)
+        if (q.isBlank()) return null
+        ensureSearchIndex()
+
+        if (nameLower.contains(q) || packageLower.contains(q)) {
+            return null
+        }
+
+        // 1. Source repo match (e.g., "RookieEnough/De-Vanced" or "De-Vanced")
+        val matchedSource = sources.firstOrNull { it.repo.lowercase(Locale.US).contains(q) }
+        if (matchedSource != null) {
+            return MatchReason.SourceRepo(matchedSource.repo)
+        }
+
+        // 2. Patch name match
+        val matchedPatch = patches.firstOrNull { it.lowercase(Locale.US).contains(q) }
+            ?: patchDetails.firstOrNull { it.name.lowercase(Locale.US).contains(q) }?.name
+        if (matchedPatch != null) {
+            return MatchReason.Patch(matchedPatch)
+        }
+
+        // 3. Patch description match
+        val matchedDetail = patchDetails.firstOrNull {
+            it.description?.lowercase(Locale.US)?.contains(q) == true
+        }
+        if (matchedDetail != null && matchedDetail.description != null) {
+            return MatchReason.Description(matchedDetail.name, matchedDetail.description)
+        }
+
+        return null
+    }
 }
 
 internal data class ArchivePatch(
@@ -60,15 +177,81 @@ internal data class ArchivePatch(
     @SerializedName("description") val description: String? = null
 )
 
+internal data class ArchiveSourceApp(
+    @SerializedName("name") val name: String = "",
+    @SerializedName("packageName") val packageName: String = "",
+    @SerializedName("patchCount") val patchCount: Int = 0,
+    @SerializedName("iconUrl") val iconUrl: String? = null,
+    @SerializedName("iconColor") val iconColor: String? = null
+)
+
 internal data class ArchiveSource(
+    @SerializedName("name") val name: String? = null,
     @SerializedName("repo") val repo: String = "",
     @SerializedName("host") val host: String? = null,
+    @SerializedName("avatarUrl") val avatarUrl: String? = null,
+    @SerializedName("patchCount") val patchCount: Int = 0,
+    @SerializedName("appCount") val appCount: Int = 0,
     @SerializedName("webUrl") val webUrl: String? = null,
     @SerializedName("addUrl") val addUrl: String? = null,
     @SerializedName("patches") val patches: List<ArchivePatch> = emptyList(),
+    @SerializedName("apps") val apps: List<ArchiveSourceApp> = emptyList(),
     /** The repo's latest release, used to rank otherwise identical sources. */
     @SerializedName("latestChanges") val latestChanges: ArchiveChanges? = null
-)
+) {
+    val displayName: String
+        get() = name?.takeIf { it.isNotBlank() } ?: repo.substringAfterLast('/')
+
+    val actualPatchCount: Int
+        get() = if (patchCount > 0) patchCount else patches.size
+
+    val actualAppCount: Int
+        get() = if (appCount > 0) appCount else apps.size
+
+    @Transient
+    private var isIndexed: Boolean = false
+
+    @Transient
+    var searchBlob: String = ""
+        private set
+
+    fun ensureSearchIndex(): ArchiveSource {
+        if (!isIndexed) {
+            val nameLower = displayName.lowercase(Locale.US)
+            val repoLower = repo.lowercase(Locale.US)
+            val appsBlob = apps.joinToString(" ") { "${it.name.lowercase(Locale.US)} ${it.packageName.lowercase(Locale.US)}" }
+            val patchesBlob = patches.joinToString(" ") { it.name.lowercase(Locale.US) }
+            searchBlob = "$nameLower $repoLower $appsBlob $patchesBlob"
+            isIndexed = true
+        }
+        return this
+    }
+
+    fun matchesQuery(queryLower: String): Boolean {
+        if (queryLower.isBlank()) return true
+        ensureSearchIndex()
+        return searchBlob.contains(queryLower)
+    }
+
+    fun scoreMatch(queryLower: String): Int {
+        val q = queryLower.trim()
+        if (q.isBlank()) return 0
+        ensureSearchIndex()
+        val nameLower = displayName.lowercase(Locale.US)
+        val repoLower = repo.lowercase(Locale.US)
+        return when {
+            nameLower == q -> 100
+            nameLower.startsWith(q) -> 90
+            repoLower == q -> 85
+            repoLower.startsWith(q) -> 80
+            nameLower.contains(q) -> 75
+            repoLower.contains(q) -> 70
+            apps.any { it.name.lowercase(Locale.US).contains(q) || it.packageName.lowercase(Locale.US).contains(q) } -> 50
+            patches.any { it.name.lowercase(Locale.US).contains(q) } -> 40
+            else -> 10
+        }
+    }
+}
 
 /** A repo's most recent release, as published in its patch bundle. */
 internal data class ArchiveChanges(
@@ -250,17 +433,58 @@ internal object MorpheArchive {
 
     private val fetchMutex = Mutex()
 
-    suspend fun getOrFetchIndex(): MorpheArchiveIndex {
+    private const val CACHE_FILE_NAME = "morphe_archive_cache.json"
+
+    fun loadFromDisk(context: Context): MorpheArchiveIndex? {
+        return runCatching {
+            val file = File(context.filesDir, CACHE_FILE_NAME)
+            if (!file.exists() || file.length() == 0L) return null
+            val body = file.readText()
+            val parsed = gson.fromJson(body, MorpheArchiveData::class.java) ?: return null
+            parsed.apps.forEach { it.ensureSearchIndex() }
+            parsed.repos.forEach { it.ensureSearchIndex() }
+            val index = MorpheArchiveIndex(
+                generatedAt = parsed.generatedAt,
+                apps = parsed.apps,
+                universalSources = parsed.universalSources,
+                repos = parsed.repos
+            )
+            cachedIndex = index
+            _indexState.value = index
+            index
+        }.getOrNull()
+    }
+
+    private fun saveToDisk(context: Context, json: String) {
+        runCatching {
+            val file = File(context.filesDir, CACHE_FILE_NAME)
+            val temp = File(context.filesDir, "$CACHE_FILE_NAME.tmp")
+            temp.writeText(json)
+            temp.renameTo(file)
+        }
+    }
+
+    suspend fun getOrFetchIndex(context: Context? = null): MorpheArchiveIndex {
         cachedIndex?.let { return it }
+        if (context != null) {
+            loadFromDisk(context)?.let { return it }
+        }
         return fetchMutex.withLock {
             cachedIndex?.let { return it }
-            runCatching { fetchIndex() }
+            if (context != null) {
+                loadFromDisk(context)?.let { return it }
+            }
+            runCatching { fetchIndex(context) }
                 .onFailure { Log.w(TAG, "Failed to fetch archive index", it) }
                 .getOrElse { cachedIndex ?: MorpheArchiveIndex() }
         }
     }
 
-    suspend fun fetchIndex(): MorpheArchiveIndex = withContext(Dispatchers.IO) {
+    suspend fun fetchIndex(context: Context? = null, forceNetwork: Boolean = false): MorpheArchiveIndex = withContext(Dispatchers.IO) {
+        if (!forceNetwork && cachedIndex != null) return@withContext cachedIndex!!
+        if (!forceNetwork && context != null && cachedIndex == null) {
+            loadFromDisk(context)?.let { return@withContext it }
+        }
         val request = Request.Builder()
             .url(INDEX_URL)
             .header(
@@ -274,8 +498,18 @@ internal object MorpheArchive {
                 error("Index request failed: HTTP ${response.code}")
             }
             val body = response.body.string()
+            if (context != null) {
+                saveToDisk(context, body)
+            }
             val parsed = gson.fromJson(body, MorpheArchiveData::class.java)
-            val index = MorpheArchiveIndex(generatedAt = parsed.generatedAt, apps = parsed.apps)
+            parsed.apps.forEach { it.ensureSearchIndex() }
+            parsed.repos.forEach { it.ensureSearchIndex() }
+            val index = MorpheArchiveIndex(
+                generatedAt = parsed.generatedAt,
+                apps = parsed.apps,
+                universalSources = parsed.universalSources,
+                repos = parsed.repos
+            )
             cachedIndex = index
             _indexState.value = index
             index
@@ -283,21 +517,37 @@ internal object MorpheArchive {
     }
 
     /**
-     * Searches indexed patchable apps by app name, package name, or supported patch names.
+     * Searches indexed patch sources / repositories by display name, repo, supported apps, or patches.
+     */
+    fun searchSources(query: String): List<ArchiveSource> {
+        val q = query.trim().lowercase(Locale.US)
+        if (q.isBlank()) return emptyList()
+        val repos = cachedIndex?.repos ?: return emptyList()
+        return repos
+            .filter { it.matchesQuery(q) }
+            .map { it to it.scoreMatch(q) }
+            .sortedWith(
+                compareByDescending<Pair<ArchiveSource, Int>> { it.second }
+                    .thenByDescending { it.first.actualPatchCount }
+            )
+            .map { it.first }
+    }
+
+    /**
+     * Searches indexed patchable apps by app name, package name, supported patch names, or source bundles.
      */
     fun searchCatalog(query: String): List<ArchiveApp> {
         val q = query.trim().lowercase(Locale.US)
         if (q.isBlank()) return emptyList()
         val apps = cachedIndex?.apps ?: return emptyList()
-        return apps.filter { app ->
-            app.name.lowercase(Locale.US).contains(q) ||
-                app.packageName.lowercase(Locale.US).contains(q) ||
-                app.patches.any { it.lowercase(Locale.US).contains(q) }
-        }.sortedWith(
-            compareByDescending<ArchiveApp> { it.name.lowercase(Locale.US).startsWith(q) }
-                .thenByDescending { it.packageName.lowercase(Locale.US).startsWith(q) }
-                .thenByDescending { it.patchCount }
-        )
+        return apps
+            .filter { it.matchesQuery(q) }
+            .map { it to it.scoreMatch(q) }
+            .sortedWith(
+                compareByDescending<Pair<ArchiveApp, Int>> { it.second }
+                    .thenByDescending { it.first.patchCount }
+            )
+            .map { it.first }
     }
 
     fun findExactMatch(query: String): ArchiveApp? {
