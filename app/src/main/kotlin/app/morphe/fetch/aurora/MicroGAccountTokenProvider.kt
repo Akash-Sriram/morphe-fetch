@@ -54,6 +54,28 @@ internal class MicroGAccountTokenProvider(
         cachedAuthData = null
     }
 
+    /**
+     * Invalidates any cached token for the given account/email in Android's AccountManager
+     * and clears the cached session, so subsequent authentication requests fetch a fresh token from Google.
+     */
+    fun invalidateToken(email: String? = null, token: String? = null) {
+        cachedAuthData = null
+        val accountManager = AccountManager.get(context)
+        if (!token.isNullOrBlank()) {
+            for (type in SUPPORTED_ACCOUNT_TYPES) {
+                runCatching { accountManager.invalidateAuthToken(type, token) }
+            }
+        }
+        val settings = context.loadHelperSettings()
+        val targetEmail = email ?: settings.auroraEmail
+        val targetToken = token ?: settings.auroraAuthToken
+        if (!targetToken.isNullOrBlank()) {
+            for (type in SUPPORTED_ACCOUNT_TYPES) {
+                runCatching { accountManager.invalidateAuthToken(type, targetToken) }
+            }
+        }
+    }
+
     fun getSupportedAccountTypes(): Array<String> = SUPPORTED_ACCOUNT_TYPES
 
     fun getAvailableAccounts(): List<Account> {
@@ -157,6 +179,8 @@ internal class MicroGAccountTokenProvider(
                 accounts.firstOrNull { it.name.equals(email, ignoreCase = true) }
                     ?: Account(email, REVANCED_ACCOUNT_TYPE)
             }
+        // Invalidate any previously cached token for this account so we don't get a stale/expired token
+        invalidateToken(email = email)
         return fetchAccountToken(account, activity)
     }
 

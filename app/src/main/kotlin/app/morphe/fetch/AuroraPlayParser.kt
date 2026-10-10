@@ -84,9 +84,41 @@ internal class AuroraPlayParser(
         request: HelperRequest,
         option: CandidateOption
     ): List<DownloadCandidate> = withContext(Dispatchers.IO) {
-        val authData = tokenProvider.getAuthData()
+        val authData = try {
+            tokenProvider.getAuthData()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to obtain auth data for Google Play", e)
+            return@withContext emptyList()
+        }
 
-        when (option) {
+        try {
+            findCandidatesInternal(request, option, authData)
+        } catch (e: GooglePlayException.AuthException) {
+            Log.w(TAG, "AuthException encountered in findCandidates for ${request.packageName}, refreshing token and retrying: ${e.message}")
+            tokenProvider.invalidateToken()
+            val freshAuthData = try {
+                tokenProvider.getAuthData()
+            } catch (reAuthEx: Exception) {
+                Log.e(TAG, "Re-authentication failed after AuthException", reAuthEx)
+                return@withContext emptyList()
+            }
+            try {
+                findCandidatesInternal(request, option, freshAuthData)
+            } catch (retryEx: Exception) {
+                Log.e(TAG, "Retry failed after re-auth for ${request.packageName}", retryEx)
+                emptyList()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Unexpected error in findCandidates for ${request.packageName}", e)
+            emptyList()
+        }
+    }
+
+    private suspend fun findCandidatesInternal(
+        request: HelperRequest,
+        option: CandidateOption,
+        authData: com.aurora.gplayapi.data.models.AuthData
+    ): List<DownloadCandidate> = when (option) {
             CandidateOption.REQUESTED -> {
                 // If Morphe Manager or the request provided explicit version codes, try purchasing them directly!
                 val candidateCodes = buildList {
@@ -105,7 +137,7 @@ internal class AuroraPlayParser(
                     )
                     if (candidate != null) {
                         Log.i(TAG, "Purchased requested version code $code for ${request.packageName} directly from Morphe request")
-                        return@withContext listOf(candidate)
+                        return@findCandidatesInternal listOf(candidate)
                     }
                 }
 
@@ -207,7 +239,7 @@ internal class AuroraPlayParser(
 
                 if (targetVersionCode == null) {
                     Log.w(TAG, "Could not resolve version code for ${request.packageName} version='${request.requestedVersionName}'")
-                    return@withContext emptyList()
+                    return@findCandidatesInternal emptyList()
                 }
 
                 val candidate = purchaseAndBuildCandidate(
@@ -228,7 +260,7 @@ internal class AuroraPlayParser(
                         .getAppByPackageName(request.packageName)
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to get latest app details for ${request.packageName}", e)
-                    return@withContext emptyList()
+                    return@findCandidatesInternal emptyList()
                 }
 
                 var latestVersionCode = details.versionCode
@@ -285,7 +317,6 @@ internal class AuroraPlayParser(
 
             CandidateOption.MANUAL -> emptyList()
         }
-    }
 
     override suspend fun resolveHistory(request: HelperRequest): List<DownloadCandidate> =
         withContext(Dispatchers.IO) {

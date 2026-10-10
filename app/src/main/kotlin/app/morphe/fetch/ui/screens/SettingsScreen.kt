@@ -6,12 +6,16 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.lifecycleScope
 import app.morphe.fetch.aurora.MicroGAccountTokenProvider
 import app.morphe.fetch.aurora.GPlayHttpClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.background
@@ -447,7 +451,8 @@ private fun AuroraAccountDialog(
 ) {
     val context = LocalContext.current
     val hostActivity = remember(context) { context.findActivity() }
-    val scope = rememberCoroutineScope()
+    val componentActivity = hostActivity as? ComponentActivity
+    val lifecycleScope = componentActivity?.lifecycleScope ?: rememberCoroutineScope()
 
     var showManualDialog by remember { mutableStateOf(false) }
     var inputEmail by rememberSaveable { mutableStateOf(settings.auroraEmail.orEmpty()) }
@@ -473,10 +478,12 @@ private fun AuroraAccountDialog(
             ?: MicroGAccountTokenProvider.REVANCED_ACCOUNT_TYPE
         if (!chosenAccountName.isNullOrBlank()) {
             isAuthenticating = true
-            scope.launch {
+            lifecycleScope.launch {
                 try {
                     val targetActivity = hostActivity ?: context.findActivity()
-                    val token = tokenProvider.fetchTokenForEmail(chosenAccountName, targetActivity, chosenAccountType)
+                    val token = withContext(Dispatchers.IO) {
+                        tokenProvider.fetchTokenForEmail(chosenAccountName, targetActivity, chosenAccountType)
+                    }
                     onSettingsChange(
                         settings.copy(
                             auroraEmail = chosenAccountName,
@@ -582,6 +589,10 @@ private fun AuroraAccountDialog(
                         HelperOutlinedButton(
                             text = "Sign Out",
                             onClick = {
+                                tokenProvider.invalidateToken(
+                                    email = settings.auroraEmail,
+                                    token = settings.auroraAuthToken
+                                )
                                 onSettingsChange(
                                     settings.copy(
                                         auroraEmail = null,
@@ -624,10 +635,12 @@ private fun AuroraAccountDialog(
                                         .fillMaxWidth()
                                         .clickable(enabled = !isAuthenticating) {
                                             isAuthenticating = true
-                                            scope.launch {
+                                            lifecycleScope.launch {
                                                 try {
                                                     val targetActivity = hostActivity ?: context.findActivity()
-                                                    val token = tokenProvider.fetchTokenForEmail(acc.name, targetActivity, acc.type)
+                                                    val token = withContext(Dispatchers.IO) {
+                                                        tokenProvider.fetchTokenForEmail(acc.name, targetActivity, acc.type)
+                                                    }
                                                     onSettingsChange(
                                                         settings.copy(
                                                             auroraEmail = acc.name,
