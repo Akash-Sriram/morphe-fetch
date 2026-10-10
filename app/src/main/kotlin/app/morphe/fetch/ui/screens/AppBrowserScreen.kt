@@ -134,7 +134,6 @@ internal fun AppBrowserScreen(
 
     var filteredApps by remember { mutableStateOf<List<ArchiveApp>>(emptyList()) }
     var filteredSources by remember { mutableStateOf<List<ArchiveSource>>(emptyList()) }
-    var matchingSourcesForSearch by remember { mutableStateOf<List<ArchiveSource>>(emptyList()) }
 
     LaunchedEffect(apps, sources, query, tab, sort, statusFilter, favourites, installedPackages) {
         val loadedApps = apps
@@ -142,7 +141,6 @@ internal fun AppBrowserScreen(
         if (loadedApps == null && loadedSources == null) {
             filteredApps = emptyList()
             filteredSources = emptyList()
-            matchingSourcesForSearch = emptyList()
             return@LaunchedEffect
         }
         val q = query.trim()
@@ -153,23 +151,26 @@ internal fun AppBrowserScreen(
             val qLower = q.lowercase(Locale.US)
 
             // Sources / Bundles filtering & ranking
-            val matchedSources = (loadedSources ?: emptyList())
-                .filter { q.isBlank() || it.matchesQuery(qLower) }
-                .let { sList ->
-                    if (q.isNotBlank()) {
-                        sList.sortedWith(
-                            compareByDescending<ArchiveSource> { it.scoreMatch(qLower) }
-                                .thenByDescending { it.actualPatchCount }
-                        )
-                    } else {
-                        when (sort) {
-                            AppSort.AZ -> sList.sortedBy { it.displayName.lowercase(Locale.US) }
-                            AppSort.ZA -> sList.sortedByDescending { it.displayName.lowercase(Locale.US) }
+            val matchedSources = if (tab != AppListTab.Bundles) {
+                emptyList()
+            } else {
+                (loadedSources ?: emptyList())
+                    .filter { q.isBlank() || it.matchesQuery(qLower) }
+                    .let { sList ->
+                        if (q.isNotBlank()) {
+                            sList.sortedWith(
+                                compareByDescending<ArchiveSource> { it.scoreMatch(qLower) }
+                                    .thenByDescending { it.actualPatchCount }
+                            )
+                        } else {
+                            when (sort) {
+                                AppSort.AZ -> sList.sortedBy { it.displayName.lowercase(Locale.US) }
+                                AppSort.ZA -> sList.sortedByDescending { it.displayName.lowercase(Locale.US) }
+                            }
                         }
                     }
-                }
+            }
             filteredSources = matchedSources
-            matchingSourcesForSearch = if (q.isNotBlank()) matchedSources else emptyList()
 
             // Apps filtering & ranking
             val matchedApps = if (tab == AppListTab.Bundles) {
@@ -301,7 +302,6 @@ internal fun AppBrowserScreen(
                 onStatusFilterSelect = { statusFilter = it },
                 filteredApps = filteredApps,
                 filteredSources = filteredSources,
-                matchingSourcesForSearch = matchingSourcesForSearch,
                 favourites = favourites,
                 installedPackages = installedPackages,
                 selected = selected,
@@ -433,7 +433,6 @@ private fun MasterListPane(
     onStatusFilterSelect: (AppStatusFilter?) -> Unit,
     filteredApps: List<ArchiveApp>,
     filteredSources: List<ArchiveSource>,
-    matchingSourcesForSearch: List<ArchiveSource>,
     favourites: Set<String>,
     installedPackages: Set<String>,
     selected: ArchiveApp?,
@@ -558,8 +557,7 @@ private fun MasterListPane(
                         }
                     }
                 } else {
-                    val hasSources = query.isNotBlank() && matchingSourcesForSearch.isNotEmpty()
-                    if (filteredApps.isEmpty() && !hasSources) {
+                    if (filteredApps.isEmpty()) {
                         InfoCard(
                             when (statusFilter) {
                                 AppStatusFilter.Favourites ->
@@ -585,55 +583,6 @@ private fun MasterListPane(
                                     contentPadding = PaddingValues(bottom = 64.dp),
                                     verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
                                 ) {
-                                    if (hasSources) {
-                                        item(key = "header_sources") {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(vertical = 4.dp),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Matching Bundles (${matchingSourcesForSearch.size})",
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                                Text(
-                                                    text = "View all in Bundles tab",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                        items(matchingSourcesForSearch.take(4), key = { "src_${it.repo}" }) { source ->
-                                            SourceBrowserCard(
-                                                source = source,
-                                                searchQuery = query,
-                                                onOpenUrl = onOpenSourceUrl,
-                                                onAddToMorphe = onAddToMorphe,
-                                                onSelectApp = { appItem ->
-                                                    val match = apps?.firstOrNull { it.packageName == appItem.packageName }
-                                                        ?: ArchiveApp(name = appItem.name, packageName = appItem.packageName)
-                                                    onSelectApp(match)
-                                                },
-                                                modifier = Modifier.animatedListItem(this)
-                                            )
-                                        }
-                                        if (filteredApps.isNotEmpty()) {
-                                            item(key = "header_apps") {
-                                                Text(
-                                                    text = "Matching Apps (${filteredApps.size})",
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-
                                     items(filteredApps, key = { it.packageName }) { app ->
                                         AppBrowserRow(
                                             app = app,
