@@ -1,0 +1,52 @@
+name: Process and Index Morphe Archive
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [upstream-archive-updated]
+
+permissions:
+  contents: write
+
+jobs:
+  process-archive:
+    name: Process Archive & Index Features
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Process Archive
+        run: |
+          python3 scripts/process_archive.py "" processed_archive.json
+
+      - name: Commit and Push Processed Archive
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check if archive-data branch exists
+          git fetch origin archive-data:archive-data || git checkout --orphan archive-data
+          git checkout archive-data
+          
+          mkdir -p data
+          mv processed_archive.json data/processed_archive.json
+          mv processed_archive.min.json data/processed_archive.min.json
+          
+          git add data/processed_archive.json data/processed_archive.min.json
+          
+          if git diff --staged --quiet; then
+            echo "No changes in archive data detected."
+          else
+            git commit -m "Update processed archive index [$(date -u +'%Y-%m-%d %H:%M UTC')]"
+            git push origin archive-data
+          fi

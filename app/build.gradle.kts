@@ -51,6 +51,18 @@ android {
         versionName = helperVersionName.get()
     }
 
+    signingConfigs {
+        getByName("debug") {
+            val projectDebugStore = rootProject.file(".android/debug.keystore")
+            if (projectDebugStore.isFile) {
+                storeFile = projectDebugStore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     val releaseSigningConfig = signingConfigs.create("release") {
         if (hasReleaseSigning) {
             storeFile = rootProject.file(releaseStoreFile.get())
@@ -66,6 +78,8 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {
                 signingConfig = releaseSigningConfig
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
             }
         }
     }
@@ -108,10 +122,7 @@ android {
 gradle.taskGraph.whenReady {
     val releaseTaskRequested = allTasks.any { it.name.contains("Release", ignoreCase = true) }
     if (releaseTaskRequested && !hasReleaseSigning) {
-        throw GradleException(
-            "Release signing is required. Provide HELPER_RELEASE_STORE_FILE, " +
-                "HELPER_RELEASE_STORE_PASSWORD, HELPER_RELEASE_KEY_ALIAS, and HELPER_RELEASE_KEY_PASSWORD.",
-        )
+        logger.lifecycle("Release signing not configured; signing release build with debug keystore.")
     }
 }
 

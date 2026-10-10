@@ -96,6 +96,9 @@ internal fun AppBrowserScreen(
 
     LaunchedEffect(loadKey) {
         error = null
+        if (loadKey > 0) {
+            AppIconResolver.clearMissingIcons()
+        }
         val cached = MorpheArchive.cachedIndex ?: withContext(Dispatchers.IO) {
             MorpheArchive.loadFromDisk(context)
         }
@@ -103,6 +106,7 @@ internal fun AppBrowserScreen(
             apps = cached.apps.sortedBy { it.name.lowercase(Locale.US) }
             sources = cached.repos.sortedBy { it.displayName.lowercase(Locale.US) }
             freshness = archiveFreshness(cached.generatedAt)
+            AppIconResolver.preloadFromDisk(context)
         } else {
             apps = null
             sources = null
@@ -115,6 +119,7 @@ internal fun AppBrowserScreen(
             apps = index.apps.sortedBy { it.name.lowercase(Locale.US) }
             sources = index.repos.sortedBy { it.displayName.lowercase(Locale.US) }
             freshness = archiveFreshness(index.generatedAt)
+            AppIconResolver.preloadFromDisk(context)
         } catch (e: Exception) {
             if (apps == null && sources == null) {
                 error = e.message ?: "Failed to load the archive index"
@@ -183,8 +188,8 @@ internal fun AppBrowserScreen(
                     .filter { app ->
                         when (statusFilter) {
                             null -> true
-                            AppStatusFilter.Installed -> app.packageName in installedPackages
-                            AppStatusFilter.NotInstalled -> app.packageName !in installedPackages
+                            AppStatusFilter.Installed -> isPackageOrPatchedInstalled(app.packageName, installedPackages)
+                            AppStatusFilter.NotInstalled -> !isPackageOrPatchedInstalled(app.packageName, installedPackages)
                             AppStatusFilter.Favourites -> app.packageName in favourites
                         }
                     }
@@ -502,35 +507,39 @@ private fun MasterListPane(
                                 .weight(1f)
                                 .fillMaxWidth()
                         ) {
-                            Row(modifier = Modifier.fillMaxSize()) {
-                                LazyColumn(
-                                    state = listState,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    contentPadding = PaddingValues(bottom = 64.dp),
-                                    verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
-                                ) {
-                                    items(filteredSources, key = { it.repo }) { source ->
-                                        SourceBrowserCard(
-                                            source = source,
-                                            searchQuery = query,
-                                            onOpenUrl = onOpenSourceUrl,
-                                            onAddToMorphe = onAddToMorphe,
-                                            onSelectApp = { appItem ->
-                                                val match = apps?.firstOrNull { it.packageName == appItem.packageName }
-                                                    ?: ArchiveApp(name = appItem.name, packageName = appItem.packageName)
-                                                onSelectApp(match)
-                                            },
-                                            modifier = Modifier.animatedListItem(this)
-                                        )
-                                    }
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(bottom = 64.dp),
+                                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                            ) {
+                                items(
+                                    items = filteredSources,
+                                    key = { it.repo },
+                                    contentType = { "bundle_card" }
+                                ) { source ->
+                                    SourceBrowserCard(
+                                        source = source,
+                                        searchQuery = query,
+                                        installedPackages = installedPackages,
+                                        favourites = favourites,
+                                        onOpenUrl = onOpenSourceUrl,
+                                        onAddToMorphe = onAddToMorphe,
+                                        onSelectApp = { appItem ->
+                                            val match = apps?.firstOrNull { it.packageName == appItem.packageName }
+                                                ?: ArchiveApp(name = appItem.name, packageName = appItem.packageName)
+                                            onSelectApp(match)
+                                        }
+                                    )
                                 }
-                                LazyListScrollbar(
-                                    listState = listState,
-                                    modifier = Modifier.fillMaxHeight()
-                                )
                             }
+                            LazyListScrollbar(
+                                listState = listState,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .fillMaxHeight()
+                                    .padding(bottom = 64.dp)
+                            )
                             val showFab by remember {
                                 derivedStateOf { listState.firstVisibleItemIndex > 0 }
                             }
@@ -574,33 +583,35 @@ private fun MasterListPane(
                                 .weight(1f)
                                 .fillMaxWidth()
                         ) {
-                            Row(modifier = Modifier.fillMaxSize()) {
-                                LazyColumn(
-                                    state = listState,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    contentPadding = PaddingValues(bottom = 64.dp),
-                                    verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
-                                ) {
-                                    items(filteredApps, key = { it.packageName }) { app ->
-                                        AppBrowserRow(
-                                            app = app,
-                                            favourite = app.packageName in favourites,
-                                            installed = app.packageName in installedPackages,
-                                            selected = (isExpanded && selected?.packageName == app.packageName),
-                                            searchQuery = query,
-                                            onToggleFavourite = { onToggleFavourite(app.packageName) },
-                                            onClick = { onSelectApp(app) },
-                                            modifier = Modifier.animatedListItem(this)
-                                        )
-                                    }
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(bottom = 64.dp),
+                                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
+                            ) {
+                                items(
+                                    items = filteredApps,
+                                    key = { it.packageName },
+                                    contentType = { "app_row" }
+                                ) { app ->
+                                    AppBrowserRow(
+                                        app = app,
+                                        favourite = app.packageName in favourites,
+                                        installed = isPackageOrPatchedInstalled(app.packageName, installedPackages),
+                                        selected = (isExpanded && selected?.packageName == app.packageName),
+                                        searchQuery = query,
+                                        onToggleFavourite = onToggleFavourite,
+                                        onClick = onSelectApp
+                                    )
                                 }
-                                LazyListScrollbar(
-                                    listState = listState,
-                                    modifier = Modifier.fillMaxHeight()
-                                )
                             }
+                            LazyListScrollbar(
+                                listState = listState,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .fillMaxHeight()
+                                    .padding(bottom = 64.dp)
+                            )
                             val showFab by remember {
                                 derivedStateOf { listState.firstVisibleItemIndex > 0 }
                             }

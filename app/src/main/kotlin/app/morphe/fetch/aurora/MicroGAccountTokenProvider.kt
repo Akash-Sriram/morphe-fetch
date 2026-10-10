@@ -23,6 +23,7 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
 import java.util.Locale
 import java.util.Properties
@@ -41,6 +42,10 @@ internal class MicroGAccountTokenProvider(
         const val GOOGLE_PLAY_AUTH_TOKEN_TYPE = "oauth2:https://www.googleapis.com/auth/googleplay"
         const val PACKAGE_NAME_PLAY_STORE = "com.android.vending"
         const val DISPENSER_URL = "https://auroraoss.com/api/auth"
+        val DEFAULT_DISPENSERS = listOf(
+            DISPENSER_URL,
+            "https://auroraoss.in/api/auth"
+        )
 
         const val GOOGLE_PLAY_CERT =
             "MIIEQzCCAyugAwIBAgIJAMLgh0ZkSjCNMA0GCSqGSIb3DQEBBAUAMHQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtHb29nbGUgSW5jLjEQMA4GA1UECxMHQW5kcm9pZDEQMA4GA1UEAxMHQW5kcm9pZDAeFw0wODA4MjEyMzEzMzRaFw0zNjAxMDcyMzEzMzRaMHQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtHb29nbGUgSW5jLjEQMA4GA1UECxMHQW5kcm9pZDEQMA4GA1UEAxMHQW5kcm9pZDCCASAwDQYJKoZIhvcNAQEBBQADggENADCCAQgCggEBAKtWLgDYO6IIrgqWbxJOKdoR8qtW0I9Y4sypEwPpt1TTcvZApxsdyxMJZ2JORland2qSGT2y5b+3JKkedxiLDmpHpDsz2WCbdxgxRczfey5YZnTJ4VZbH0xqWVW/8lGmPav5xVwnIiJS6HXk+BVKZF+JcWjAsb/GEuq/eFdpuzSqeYTcfi6idkyugwfYwXFU1+5fZKUaRKYCwkkFQVfcAs1fXA5V+++FGfvjJ/CxURaSxaBvGdGDhfXE28LWuT9ozCl5xw4Yq5OGazvV24mZVSoOO0yZ31j7kYvtwYK6NeADwbSxDdJEqO4k//0zOHKrUiGYXtqw/A0LFFtqoZKFjnkCAQOjgdkwgdYwHQYDVR0OBBYEFMd9jMIhF1Ylmn/Tgt9r45jk14alMIGmBgNVHSMEgZ4wgZuAFMd9jMIhF1Ylmn/Tgt9r45jk14aloXikdjB0MQswCQYDVQQGEwJVUzETMBEGA1UECBMKQ2FsaWZvcm5pYTEWMBQGA1UEBxMNTW91bnRhaW4gVmlldzEUMBIGA1UEChMLR29vZ2xlIEluYy4xEDAOBgNVBAsTB0FuZHJvaWQxEDAOBgNVBAMTB0FuZHJvaWSCCQDC4IdGZEowjTAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBBAUAA4IBAQBt0lLO74UwLDYKqs6Tm8/yzKkEu116FmH4rkaymUIE0P9KaMftGlMexFlaYjzmB2OxZyl6euNXEsQH8gjwyxCUKRJNexBiGcCEyj6z+a1fuHHvkiaai+KL8W1EyNmgjmyy8AW7P+LLlkR+ho5zEHatRbM/YAnqGcFh5iZBqpknHf1SKMXFh4dd239FJ1jWYfbMDMy3NS5CTMQ2XFI1MvcyUTdZPErjQfTbQe3aDQsQcafEQPD+nqActifKZ0Np0IS9L9kR/wbNvyz6ENwPiTrjV2KRkEjH78ZMcUQXg0L3BYHJ3lc69Vs5Ddf9uUGGMYldX3WfMBEmh/9iFBDAaTCK"
@@ -121,17 +126,19 @@ internal class MicroGAccountTokenProvider(
             }
         }
 
-        // 2. Automatically fetch session using Aurora dispenser infrastructure
-        for (attempt in 1..3) {
-            try {
-                val authData = fetchAnonymousAuthData(deviceProps, locale)
-                cachedAuthData = authData
-                Log.i(TAG, "Successfully authenticated with Aurora dispenser infrastructure on attempt $attempt")
-                return@withContext authData
-            } catch (e: Exception) {
-                Log.w(TAG, "Aurora dispenser auth attempt $attempt failed: ${e.message}")
-                if (attempt < 3) {
-                    kotlinx.coroutines.delay(1000L * attempt)
+        // 2. Automatically fetch session using Aurora dispenser infrastructure with endpoint failover
+        for (dispenser in DEFAULT_DISPENSERS) {
+            for (attempt in 1..2) {
+                try {
+                    val authData = fetchAnonymousAuthData(dispenser, deviceProps, locale)
+                    cachedAuthData = authData
+                    Log.i(TAG, "Successfully authenticated with Aurora dispenser ($dispenser) on attempt $attempt")
+                    return@withContext authData
+                } catch (e: Exception) {
+                    Log.w(TAG, "Aurora dispenser ($dispenser) attempt $attempt failed: ${e.message}")
+                    if (attempt < 2) {
+                        kotlinx.coroutines.delay(800L * attempt)
+                    }
                 }
             }
         }
@@ -188,94 +195,98 @@ internal class MicroGAccountTokenProvider(
         cachedAuthData = null
     }
 
-    private suspend fun fetchAccountToken(account: Account, activity: Activity?): String =
-        suspendCancellableCoroutine { continuation ->
-            val accountManager = AccountManager.get(context)
-            val options = Bundle().apply {
-                putString("overridePackage", PACKAGE_NAME_PLAY_STORE)
-                putByteArray("overrideCertificate", Base64.decode(GOOGLE_PLAY_CERT, Base64.DEFAULT))
-            }
-            val handler = Handler(Looper.getMainLooper())
+    private suspend fun fetchAccountToken(account: Account, activity: Activity?): String {
+        val timeoutMs = if (activity != null) 30000L else 8000L
+        return withTimeout(timeoutMs) {
+            suspendCancellableCoroutine { continuation ->
+                val accountManager = AccountManager.get(context)
+                val options = Bundle().apply {
+                    putString("overridePackage", PACKAGE_NAME_PLAY_STORE)
+                    putByteArray("overrideCertificate", Base64.decode(GOOGLE_PLAY_CERT, Base64.DEFAULT))
+                }
+                val handler = Handler(Looper.getMainLooper())
 
-            val callback = object : AccountManagerCallback<Bundle> {
-                var retried = false
+                val callback = object : AccountManagerCallback<Bundle> {
+                    var retried = false
 
-                override fun run(future: AccountManagerFuture<Bundle>) {
-                    try {
-                        val result = future.result
-                        val token = result.getString(AccountManager.KEY_AUTHTOKEN)
-                        if (!token.isNullOrBlank()) {
-                            if (continuation.isActive) continuation.resume(token)
-                            return
-                        }
-
-                        // MicroG-RE AskPackageOverrideActivity returns "retry" upon user granting consent
-                        val isRetry = result.getBoolean("retry", false) || result.containsKey("retry")
-                        if (!retried && (isRetry || activity != null)) {
-                            retried = true
-                            Log.i(TAG, "MicroG consent/retry received for ${account.name} (${account.type}), requesting token again...")
-                            accountManager.getAuthToken(
-                                account,
-                                GOOGLE_PLAY_AUTH_TOKEN_TYPE,
-                                options,
-                                activity,
-                                this,
-                                handler
-                            )
-                            return
-                        }
-
-                        if (continuation.isActive) {
-                            continuation.resumeWithException(
-                                IllegalStateException("AccountManager returned null auth token for ${account.name}")
-                            )
-                        }
-                    } catch (e: Exception) {
-                        if (continuation.isActive) {
-                            val msg = if (e.message?.contains("UnregisteredOnApiConsole", ignoreCase = true) == true) {
-                                "Google Play Services does not permit direct login for third-party apps. Please stay with Anonymous session or use MicroG-RE."
-                            } else {
-                                e.message ?: "Authentication failed"
+                    override fun run(future: AccountManagerFuture<Bundle>) {
+                        try {
+                            val result = future.result
+                            val token = result.getString(AccountManager.KEY_AUTHTOKEN)
+                            if (!token.isNullOrBlank()) {
+                                if (continuation.isActive) continuation.resume(token)
+                                return
                             }
-                            continuation.resumeWithException(IllegalStateException(msg, e))
+
+                            // MicroG-RE AskPackageOverrideActivity returns "retry" upon user granting consent
+                            val isRetry = result.getBoolean("retry", false) || result.containsKey("retry")
+                            if (!retried && (isRetry || activity != null)) {
+                                retried = true
+                                Log.i(TAG, "MicroG consent/retry received for ${account.name} (${account.type}), requesting token again...")
+                                accountManager.getAuthToken(
+                                    account,
+                                    GOOGLE_PLAY_AUTH_TOKEN_TYPE,
+                                    options,
+                                    activity,
+                                    this,
+                                    handler
+                                )
+                                return
+                            }
+
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(
+                                    IllegalStateException("AccountManager returned null auth token for ${account.name}")
+                                )
+                            }
+                        } catch (e: Exception) {
+                            if (continuation.isActive) {
+                                val msg = if (e.message?.contains("UnregisteredOnApiConsole", ignoreCase = true) == true) {
+                                    "Google Play Services does not permit direct login for third-party apps. Please stay with Anonymous session or use MicroG-RE."
+                                } else {
+                                    e.message ?: "Authentication failed"
+                                }
+                                continuation.resumeWithException(IllegalStateException(msg, e))
+                            }
                         }
                     }
                 }
-            }
 
-            if (activity != null) {
-                accountManager.getAuthToken(
-                    account,
-                    GOOGLE_PLAY_AUTH_TOKEN_TYPE,
-                    options,
-                    activity,
-                    callback,
-                    handler
-                )
-            } else {
-                accountManager.getAuthToken(
-                    account,
-                    GOOGLE_PLAY_AUTH_TOKEN_TYPE,
-                    options,
-                    true,
-                    callback,
-                    handler
-                )
+                if (activity != null) {
+                    accountManager.getAuthToken(
+                        account,
+                        GOOGLE_PLAY_AUTH_TOKEN_TYPE,
+                        options,
+                        activity,
+                        callback,
+                        handler
+                    )
+                } else {
+                    accountManager.getAuthToken(
+                        account,
+                        GOOGLE_PLAY_AUTH_TOKEN_TYPE,
+                        options,
+                        true,
+                        callback,
+                        handler
+                    )
+                }
             }
         }
+    }
 
-    private fun fetchAnonymousAuthData(deviceProps: Properties, locale: Locale): AuthData {
+    private fun fetchAnonymousAuthData(dispenserUrl: String, deviceProps: Properties, locale: Locale): AuthData {
         val jsonProps = JsonObject()
         for (name in deviceProps.stringPropertyNames()) {
             jsonProps.addProperty(name, deviceProps.getProperty(name))
         }
 
         val playResponse = httpClient.postAuth(
-            DISPENSER_URL,
+            dispenserUrl,
             jsonProps.toString().toByteArray(Charsets.UTF_8)
         )
         if (!playResponse.isSuccessful) {
-            throw IOException("Dispenser request failed with HTTP ${playResponse.code}")
+            throw IOException("Dispenser ($dispenserUrl) request failed with HTTP ${playResponse.code}")
         }
 
         val jsonString = String(playResponse.responseBytes, Charsets.UTF_8)
@@ -291,7 +302,7 @@ internal class MicroGAccountTokenProvider(
             authToken = token,
             isAnonymous = json.get("isAnonymous")?.asBoolean ?: true,
             gsfId = json.get("gsfId")?.asString.orEmpty(),
-            tokenDispenserUrl = json.get("tokenDispenserUrl")?.asString ?: DISPENSER_URL,
+            tokenDispenserUrl = json.get("tokenDispenserUrl")?.asString ?: dispenserUrl,
             ac2dmToken = json.get("ac2dmToken")?.asString.orEmpty(),
             androidCheckInToken = json.get("androidCheckInToken")?.asString.orEmpty(),
             deviceCheckInConsistencyToken = json.get("deviceCheckInConsistencyToken")?.asString.orEmpty(),

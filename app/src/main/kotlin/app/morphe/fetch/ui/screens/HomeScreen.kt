@@ -154,24 +154,29 @@ internal fun HelperScreen(
         pendingFilePick = candidate
         filePickerLauncher.launch(APK_PICKER_MIME_TYPES)
     }
-    BackHandler(enabled = showSettings || showAppBrowser || request != null || state is UiState.Completed) {
-        when {
-            showSettings -> showSettings = false
-            showAppBrowser -> showAppBrowser = false
-            state is UiState.Completed || request != null -> {
-                onClearRequest()
-                refreshHistory()
-            }
-        }
-    }
-
-    val handleCancel: () -> Unit = {
-        if (request != null) {
+    val handleDismissRequest: () -> Unit = {
+        if (request != null && request.callerPackage.isNotBlank()) {
+            onCancel()
+        } else if (request != null) {
             onClearRequest()
             refreshHistory()
         } else {
             onCancel()
         }
+    }
+
+    BackHandler(enabled = showSettings || showAppBrowser || request != null || state is UiState.Completed) {
+        when {
+            showSettings -> showSettings = false
+            showAppBrowser -> showAppBrowser = false
+            state is UiState.Completed || request != null -> {
+                handleDismissRequest()
+            }
+        }
+    }
+
+    val handleCancel: () -> Unit = {
+        handleDismissRequest()
     }
 
     val flowVisible = request != null && state is UiState.Ready
@@ -409,7 +414,7 @@ internal fun HelperScreen(
                                         AppInfoCard(
                                             request = request,
                                             onFormatSelected = onRequestFileTypeChange,
-                                            onClearRequest = onClearRequest
+                                            onClearRequest = handleDismissRequest
                                         )
                                     }
                                 }
@@ -492,10 +497,7 @@ internal fun HelperScreen(
                                                     onSendToMorphe = {
                                                         onDeliverPendingResult?.invoke(state.result)
                                                     },
-                                                    onDone = {
-                                                        onClearRequest()
-                                                        refreshHistory()
-                                                    }
+                                                    onDone = handleDismissRequest
                                                 )
                                             }
                                         }
@@ -658,7 +660,7 @@ internal fun HelperScreen(
                                 AppInfoCard(
                                     request = request,
                                     onFormatSelected = onRequestFileTypeChange,
-                                    onClearRequest = onClearRequest
+                                    onClearRequest = handleDismissRequest
                                 )
                             }
                         }
@@ -730,10 +732,7 @@ internal fun HelperScreen(
                                             onSendToMorphe = {
                                                 onDeliverPendingResult?.invoke(state.result)
                                             },
-                                            onDone = {
-                                                onClearRequest()
-                                                refreshHistory()
-                                            }
+                                            onDone = handleDismissRequest
                                         )
                                     }
                                 }

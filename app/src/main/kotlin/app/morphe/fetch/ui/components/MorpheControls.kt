@@ -306,6 +306,7 @@ internal fun MorpheFilterChip(
     onClick: () -> Unit,
     label: String,
     modifier: Modifier = Modifier,
+    leadingIcon: ImageVector? = null,
     selectedIcon: ImageVector = Icons.Outlined.Done
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -322,13 +323,17 @@ internal fun MorpheFilterChip(
             )
         },
         modifier = modifier,
-        leadingIcon = if (selected) {
-            { Icon(selectedIcon, contentDescription = null, modifier = Modifier.size(16.dp)) }
-        } else {
-            null
+        leadingIcon = when {
+            selected -> {
+                { Icon(selectedIcon, contentDescription = null, modifier = Modifier.size(16.dp)) }
+            }
+            leadingIcon != null -> {
+                { Icon(leadingIcon, contentDescription = null, modifier = Modifier.size(16.dp), tint = scheme.onSurfaceVariant) }
+            }
+            else -> null
         },
         colors = FilterChipDefaults.filterChipColors(
-            containerColor = scheme.surfaceColorAtElevation(2.dp),
+            containerColor = scheme.surfaceColorAtElevation(1.dp),
             labelColor = scheme.onSurfaceVariant,
             selectedContainerColor = scheme.primaryContainer,
             selectedLabelColor = scheme.onPrimaryContainer,
@@ -337,7 +342,7 @@ internal fun MorpheFilterChip(
         border = FilterChipDefaults.filterChipBorder(
             enabled = true,
             selected = selected,
-            borderColor = scheme.outline.copy(alpha = 0.5f),
+            borderColor = scheme.outlineVariant,
             selectedBorderColor = scheme.primary,
             selectedBorderWidth = 1.dp
         )
@@ -364,9 +369,12 @@ internal fun MorpheStatusBadge(
     contentColor: Color = tone.content,
     onClick: (() -> Unit)? = null
 ) {
-    // Zero-width spaces so long tokens break at "/" and "." instead of overflowing the pill.
     val breakableText = remember(text) {
-        text?.replace("/", "/\u200B")?.replace(".", ".\u200B")
+        if (text != null && (text.indexOf('/') >= 0 || text.indexOf('.') >= 0)) {
+            text.replace("/", "/\u200B").replace(".", ".\u200B")
+        } else {
+            text
+        }
     }
 
     Row(

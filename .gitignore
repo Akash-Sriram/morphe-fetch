@@ -14,3 +14,4 @@ revanced-manager-downloaders/
 *.apk
 .DS_Store
 .android/
+scripts/processed_archive*.json

@@ -105,22 +105,32 @@ internal fun SurfaceCard(
     color: Color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
     content: @Composable () -> Unit
 ) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(cornerRadius))
-            .then(
-                if (onClick != null) Modifier.clickable(enabled = enabled, onClick = onClick)
-                else Modifier
-            ),
-        shape = RoundedCornerShape(cornerRadius),
-        color = color,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = elevation,
-        shadowElevation = 0.dp,
-        border = if (borderWidth > 0.dp) BorderStroke(borderWidth, borderColor) else null
-    ) {
-        content()
+    if (onClick != null) {
+        Surface(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(cornerRadius),
+            color = color,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = elevation,
+            shadowElevation = 0.dp,
+            border = if (borderWidth > 0.dp) BorderStroke(borderWidth, borderColor) else null
+        ) {
+            content()
+        }
+    } else {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(cornerRadius),
+            color = color,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = elevation,
+            shadowElevation = 0.dp,
+            border = if (borderWidth > 0.dp) BorderStroke(borderWidth, borderColor) else null
+        ) {
+            content()
+        }
     }
 }
 

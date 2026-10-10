@@ -102,7 +102,8 @@ internal fun AppInfoCard(
             ) {
                 AppAvatar(
                     packageName = request.packageName,
-                    initial = request.appName.firstOrNull()?.uppercaseChar() ?: '?'
+                    initial = request.appName.firstOrNull()?.uppercaseChar() ?: '?',
+                    allowWebScraping = true
                 )
 
                 Column(

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import java.util.Locale
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,12 +16,15 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +33,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Dns
@@ -43,6 +49,9 @@ import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +69,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -171,59 +181,245 @@ internal fun ArchiveFilterRow(
     onStatusFilterSelect: (AppStatusFilter?) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Row 1: Exactly two primary filters: Apps vs Bundles
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // Row 1: Unified segmented pill control for Apps vs Bundles
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
-            AppListTab.entries.forEach { t ->
-                MorpheFilterChip(
-                    selected = tab == t,
-                    onClick = { onTabSelect(t) },
-                    label = t.label,
-                    modifier = Modifier.weight(1f)
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AppListTab.entries.forEach { t ->
+                    val isSelected = tab == t
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        shape = RoundedCornerShape(9.dp),
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            Color.Transparent
+                        },
+                        border = if (isSelected) {
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                        } else null,
+                        onClick = { onTabSelect(t) }
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = t.icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = if (isSelected) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = t.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        // Row 2: Sort (A–Z, Z–A) + Installed / Not installed / Liked filters
+        // Row 2: Status filter dropdown (Apps tab only) + Sort chips
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (tab == AppListTab.Apps) {
+                StatusFilterDropdown(
+                    statusFilter = statusFilter,
+                    onStatusFilterSelect = onStatusFilterSelect
+                )
+
+                MorpheVerticalDivider(
+                    modifier = Modifier
+                        .height(20.dp)
+                        .padding(horizontal = 2.dp)
+                )
+            }
+
             Text(
                 text = "Sort:",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(end = 2.dp)
             )
+
             AppSort.entries.forEach { s ->
                 MorpheFilterChip(
                     selected = sort == s,
                     onClick = { onSortSelect(s) },
-                    label = s.label
+                    label = s.label,
+                    leadingIcon = s.icon,
+                    selectedIcon = s.icon
                 )
             }
+        }
+    }
+}
 
-            if (tab == AppListTab.Apps) {
-                MorpheVerticalDivider(
-                    modifier = Modifier
-                        .height(18.dp)
-                        .padding(horizontal = 4.dp)
+@Composable
+internal fun StatusFilterDropdown(
+    statusFilter: AppStatusFilter?,
+    onStatusFilterSelect: (AppStatusFilter?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val isFiltered = statusFilter != null
+
+    Box(modifier = modifier) {
+        Surface(
+            onClick = { expanded = true },
+            shape = RoundedCornerShape(10.dp),
+            color = if (isFiltered) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+            },
+            border = BorderStroke(
+                1.dp,
+                if (isFiltered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+            ),
+            modifier = Modifier.height(36.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = statusFilter?.icon ?: Icons.Outlined.Tune,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isFiltered) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 )
-                AppStatusFilter.entries.forEach { f ->
-                    MorpheFilterChip(
-                        selected = statusFilter == f,
-                        onClick = {
-                            onStatusFilterSelect(if (statusFilter == f) null else f)
-                        },
-                        label = f.label
+                Text(
+                    text = if (isFiltered) statusFilter.label else "Filter",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (isFiltered) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (isFiltered) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+                Icon(
+                    imageVector = Icons.Outlined.ArrowDropDown,
+                    contentDescription = "Expand status filter",
+                    modifier = Modifier.size(18.dp),
+                    tint = if (isFiltered) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.background(MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp))
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "All",
+                        fontWeight = if (statusFilter == null) FontWeight.Bold else FontWeight.Normal,
+                        color = if (statusFilter == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Tune,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = if (statusFilter == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                trailingIcon = if (statusFilter == null) {
+                    {
+                        Icon(
+                            imageVector = Icons.Outlined.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                } else null,
+                onClick = {
+                    onStatusFilterSelect(null)
+                    expanded = false
                 }
+            )
+
+            AppStatusFilter.entries.forEach { f ->
+                val isSelected = statusFilter == f
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = f.label,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = f.icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    trailingIcon = if (isSelected) {
+                        {
+                            Icon(
+                                imageVector = Icons.Outlined.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else null,
+                    onClick = {
+                        onStatusFilterSelect(if (isSelected) null else f)
+                        expanded = false
+                    }
+                )
             }
         }
     }
@@ -236,8 +432,8 @@ internal fun AppBrowserRow(
     installed: Boolean = false,
     selected: Boolean = false,
     searchQuery: String = "",
-    onToggleFavourite: () -> Unit,
-    onClick: () -> Unit,
+    onToggleFavourite: (String) -> Unit,
+    onClick: (ArchiveApp) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val cardColor = if (selected) {
@@ -250,9 +446,10 @@ internal fun AppBrowserRow(
 
     SurfaceCard(
         modifier = modifier,
-        onClick = onClick,
+        onClick = { onClick(app) },
         cornerRadius = 14.dp,
         color = cardColor,
+        elevation = 0.dp,
         borderWidth = borderWidth,
         borderColor = borderColor
     ) {
@@ -340,7 +537,7 @@ internal fun AppBrowserRow(
                         icon = Icons.Outlined.Dns,
                         tone = SemanticTone.Primary
                     )
-                    formatReleaseDate(app.newestReleaseDate())?.let { released ->
+                    app.formattedReleaseDate?.let { released ->
                         Text(
                             text = "Updated $released",
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
@@ -351,12 +548,17 @@ internal fun AppBrowserRow(
                     }
                 }
             }
-            HelperIconButton(
-                icon = if (favourite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                contentDescription = if (favourite) "Unlike" else "Like",
-                onClick = onToggleFavourite,
-                tint = if (favourite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            IconButton(
+                onClick = { onToggleFavourite(app.packageName) },
+                modifier = Modifier.size(MorpheDefaults.GlassButtonHeight)
+            ) {
+                Icon(
+                    imageVector = if (favourite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = if (favourite) "Unlike" else "Like",
+                    tint = if (favourite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    modifier = Modifier.size(MorpheDefaults.IconSizeSmall)
+                )
+            }
         }
     }
 }
@@ -372,13 +574,20 @@ internal fun AsyncAvatar(
     cornerRadius: Dp = 6.dp
 ) {
     val context = LocalContext.current
-    var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    var bitmap by remember(url) {
+        mutableStateOf<ImageBitmap?>(
+            if (!url.isNullOrBlank()) AppIconResolver.getCachedUrl(url) else null
+        )
+    }
 
     LaunchedEffect(url) {
         if (url.isNullOrBlank()) {
             bitmap = null
-        } else {
-            bitmap = AppIconResolver.resolveUrl(context, url)
+        } else if (bitmap == null) {
+            val resolved = AppIconResolver.resolveUrl(context, url)
+            if (resolved != null) {
+                bitmap = resolved
+            }
         }
     }
 
@@ -457,7 +666,8 @@ internal fun AppDetailView(
                         AppAvatar(
                             packageName = app.packageName,
                             initial = app.name.firstOrNull()?.uppercaseChar() ?: '?',
-                            iconUrl = app.iconUrl
+                            iconUrl = app.iconUrl,
+                            allowWebScraping = true
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -494,7 +704,7 @@ internal fun AppDetailView(
                                 tone = SemanticTone.Neutral
                             )
                         }
-                        formatReleaseDate(app.newestReleaseDate())?.let { released ->
+                        app.formattedReleaseDate?.let { released ->
                             MorpheStatusBadge(
                                 text = "Updated $released",
                                 icon = Icons.Outlined.Schedule,
@@ -539,7 +749,7 @@ internal fun AppDetailView(
             item { MorpheEmptyState(message = "No patch sources listed for this app.") }
         } else {
             item {
-                MorpheSectionTitle(text = "Sources", icon = Icons.Outlined.Extension)
+                MorpheSectionTitle(text = "Sources (${sortedSources.size})", icon = Icons.Outlined.Extension)
             }
             items(sortedSources, key = { it.repo }) { source ->
                 val autoExpand = remember(source.repo, searchQuery) {
@@ -604,12 +814,15 @@ internal fun AppSourceCard(
                         text = buildString {
                             append("${source.patches.size} ")
                             append(if (source.patches.size == 1) "patch" else "patches")
+                            if (source.exclusivePatchCount > 0) {
+                                append(" · ⭐ ${source.exclusivePatchCount} exclusive")
+                            }
                             formatBundleRelease(source.latestChanges)?.let { release ->
                                 append(" · ")
                                 append(release)
                             }
                         },
-                        color = colors.onSurfaceVariant,
+                        color = if (source.exclusivePatchCount > 0) colors.primary else colors.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -652,6 +865,13 @@ internal fun AppSourceCard(
                     modifier = Modifier.padding(horizontal = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (source.mirrors.isNotEmpty()) {
+                        Text(
+                            text = "Identical Forks / Mirrors: " + source.mirrors.joinToString(", "),
+                            color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     if (source.patches.isEmpty()) {
                         Text(
                             "No patches listed for this source.",
@@ -661,46 +881,77 @@ internal fun AppSourceCard(
                     } else {
                         val longList = source.patches.size > 5
                         val patchesScroll = rememberScrollState()
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            Box(
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = if (longList) 240.dp else Dp.Unspecified)
+                        ) {
+                            Column(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(max = if (longList) 240.dp else Dp.Unspecified)
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (longList) Modifier.verticalScroll(patchesScroll) else Modifier
+                                    ),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .then(
-                                            if (longList) Modifier.verticalScroll(patchesScroll) else Modifier
-                                        ),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    source.patches.forEach { patch ->
-                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.Extension,
-                                                    contentDescription = null,
-                                                    tint = colors.primary,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                                Text(
-                                                    text = patch.name,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = colors.onSurface,
-                                                    style = MaterialTheme.typography.bodySmall
+                                val sortedPatches = remember(source.patches, source.exclusivePatches) {
+                                    val exclusiveSet = source.exclusivePatches.map { it.lowercase(Locale.US) }.toSet()
+                                    source.patches.sortedWith(
+                                        compareByDescending<ArchivePatch> { 
+                                            it.name.lowercase(Locale.US) in exclusiveSet 
+                                        }.thenBy { it.name }
+                                    )
+                                }
+                                val exclusiveSet = remember(source.exclusivePatches) {
+                                    source.exclusivePatches.map { it.lowercase(Locale.US) }.toSet()
+                                }
+                                sortedPatches.forEach { patch ->
+                                    val isExclusive = patch.name.lowercase(Locale.US) in exclusiveSet
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .then(
+                                                if (isExclusive) {
+                                                    Modifier
+                                                        .background(
+                                                            color = colors.primaryContainer.copy(alpha = 0.25f),
+                                                            shape = RoundedCornerShape(8.dp)
+                                                        )
+                                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                                } else Modifier
+                                            ),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Extension,
+                                                contentDescription = null,
+                                                tint = if (isExclusive) colors.primary else colors.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text(
+                                                text = patch.name,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isExclusive) colors.primary else colors.onSurface,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            if (isExclusive) {
+                                                MorpheStatusBadge(
+                                                    text = "Exclusive",
+                                                    tone = SemanticTone.Warning
                                                 )
                                             }
-                                            patch.description?.takeIf { it.isNotBlank() }?.let { desc ->
-                                                Text(
-                                                    text = desc,
-                                                    color = colors.onSurfaceVariant,
-                                                    style = MaterialTheme.typography.bodySmall
-                                                )
-                                            }
+                                        }
+                                        patch.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                                            Text(
+                                                text = desc,
+                                                color = colors.onSurfaceVariant,
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
                                         }
                                     }
                                 }
@@ -708,7 +959,9 @@ internal fun AppSourceCard(
                             if (longList) {
                                 ScrollStateScrollbar(
                                     scrollState = patchesScroll,
-                                    modifier = Modifier.fillMaxHeight()
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .fillMaxHeight()
                                 )
                             }
                         }
@@ -719,10 +972,30 @@ internal fun AppSourceCard(
     }
 }
 
+internal fun isPackageOrPatchedInstalled(packageName: String, installedPackages: Set<String>): Boolean {
+    if (packageName.isBlank()) return false
+    if (packageName in installedPackages) return true
+    var core = packageName
+    for (prefix in listOf("com.google.", "com.", "org.", "io.", "net.")) {
+        if (core.startsWith(prefix)) {
+            core = core.removePrefix(prefix)
+            break
+        }
+    }
+    return installedPackages.any { installed ->
+        installed == "app.morphe.$packageName" ||
+        installed == "app.revanced.$packageName" ||
+        ((installed.startsWith("app.morphe.") || installed.startsWith("app.revanced.")) &&
+            (installed.endsWith(core) || core.endsWith(installed.removePrefix("app.morphe.").removePrefix("app.revanced."))))
+    }
+}
+
 @Composable
 internal fun SourceBrowserCard(
     source: ArchiveSource,
     searchQuery: String = "",
+    installedPackages: Set<String> = emptySet(),
+    favourites: Set<String> = emptySet(),
     onOpenUrl: (String) -> Unit,
     onAddToMorphe: (String) -> Unit,
     onSelectApp: ((ArchiveSourceApp) -> Unit)? = null,
@@ -730,6 +1003,13 @@ internal fun SourceBrowserCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
+
+    val installedAppsCount = remember(source.apps, installedPackages) {
+        source.apps.count { isPackageOrPatchedInstalled(it.packageName, installedPackages) }
+    }
+    val likedAppsCount = remember(source.apps, favourites) {
+        source.apps.count { it.packageName in favourites }
+    }
 
     SurfaceCard(
         modifier = modifier,
@@ -787,7 +1067,7 @@ internal fun SourceBrowserCard(
                 }
             }
 
-            // Stats row (patches and apps count)
+            // Stats row (patches, apps count, installed, and liked)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -803,6 +1083,27 @@ internal fun SourceBrowserCard(
                         text = "${source.actualAppCount} apps",
                         icon = Icons.Outlined.Layers,
                         tone = SemanticTone.Neutral
+                    )
+                }
+                if (source.exclusivePatchCount > 0) {
+                    MorpheStatusBadge(
+                        text = "${source.exclusivePatchCount} exclusive",
+                        icon = Icons.Outlined.Extension,
+                        tone = SemanticTone.Warning
+                    )
+                }
+                if (installedAppsCount > 0) {
+                    MorpheStatusBadge(
+                        text = "$installedAppsCount installed",
+                        icon = Icons.Outlined.CheckCircle,
+                        tone = SemanticTone.Success
+                    )
+                }
+                if (likedAppsCount > 0) {
+                    MorpheStatusBadge(
+                        text = "$likedAppsCount liked",
+                        icon = Icons.Filled.Favorite,
+                        tone = SemanticTone.Error
                     )
                 }
             }
@@ -855,6 +1156,13 @@ internal fun SourceBrowserCard(
                     } else {
                         val longList = source.apps.size > 6
                         val appsScroll = rememberScrollState()
+                        val sortedApps = remember(source.apps, installedPackages, favourites) {
+                            source.apps.sortedWith(
+                                compareByDescending<ArchiveSourceApp> { isPackageOrPatchedInstalled(it.packageName, installedPackages) }
+                                    .thenByDescending { it.packageName in favourites }
+                                    .thenBy { it.name.lowercase(Locale.US) }
+                            )
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -866,11 +1174,20 @@ internal fun SourceBrowserCard(
                                     .then(if (longList) Modifier.verticalScroll(appsScroll) else Modifier),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                source.apps.forEach { appItem ->
+                                sortedApps.forEach { appItem ->
+                                    val isInstalled = isPackageOrPatchedInstalled(appItem.packageName, installedPackages)
+                                    val isLiked = appItem.packageName in favourites
                                     Surface(
                                         onClick = { onSelectApp?.invoke(appItem) },
                                         shape = RoundedCornerShape(8.dp),
-                                        color = colors.surfaceVariant.copy(alpha = 0.5f),
+                                        color = if (isInstalled) {
+                                            colors.primaryContainer.copy(alpha = 0.22f)
+                                        } else {
+                                            colors.surfaceVariant.copy(alpha = 0.5f)
+                                        },
+                                        border = if (isInstalled) {
+                                            BorderStroke(1.dp, colors.primary.copy(alpha = 0.35f))
+                                        } else null,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Row(
@@ -885,14 +1202,34 @@ internal fun SourceBrowserCard(
                                                 cornerRadius = 6.dp
                                             )
                                             Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = appItem.name,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = colors.onSurface,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = appItem.name,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = colors.onSurface,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    if (isInstalled) {
+                                                        MorpheStatusBadge(
+                                                            text = "Installed",
+                                                            icon = Icons.Outlined.CheckCircle,
+                                                            tone = SemanticTone.Success
+                                                        )
+                                                    }
+                                                    if (isLiked) {
+                                                        Icon(
+                                                            imageVector = Icons.Filled.Favorite,
+                                                            contentDescription = "Liked",
+                                                            tint = colors.error,
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                    }
+                                                }
                                                 Text(
                                                     text = appItem.packageName,
                                                     style = MaterialTheme.typography.bodySmall,
@@ -915,7 +1252,9 @@ internal fun SourceBrowserCard(
                             if (longList) {
                                 ScrollStateScrollbar(
                                     scrollState = appsScroll,
-                                    modifier = Modifier.fillMaxHeight()
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .fillMaxHeight()
                                 )
                             }
                         }
@@ -925,4 +1264,5 @@ internal fun SourceBrowserCard(
         }
     }
 }
+
 

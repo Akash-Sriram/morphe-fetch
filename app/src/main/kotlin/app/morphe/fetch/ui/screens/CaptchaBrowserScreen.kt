@@ -322,6 +322,9 @@ private const val CAPTCHA_CAPTURE_JS = """
     if (!u) return false;
     try { u = decodeURIComponent(u); } catch (e) {}
     if (u.indexOf('uptodown-') !== -1 && u.indexOf('.apk') !== -1) return false;
+    if (u.indexOf('dw.uptodown.com') !== -1 || u.indexOf('dw.uptodown.net') !== -1) return true;
+    if (u.indexOf('d.apkpure.com') !== -1 || u.indexOf('download.apkpure.com') !== -1 || u.indexOf('/b/apk/') !== -1 || u.indexOf('/b/xapk/') !== -1) return true;
+    if (u.indexOf('download.apkcombo.com') !== -1 || u.indexOf('apkcombo.app') !== -1) return true;
     return re.test(u) || /filename[^.]*\.(apk|apks|apkm|xapk)/i.test(u) || dlPhp.test(u) || /download\.php\?id=\d+/i.test(u);
   }
   
@@ -351,7 +354,13 @@ internal fun String.looksLikeApkDownload(): Boolean {
         Regex("""download\.php\?.*id=\d+""").containsMatchIn(decoded) ||
         Regex("""download\.php\?id=\d+""").containsMatchIn(decoded) ||
         contains("dw.uptodown.com", ignoreCase = true) ||
-        contains("dw.uptodown.net", ignoreCase = true)
+        contains("dw.uptodown.net", ignoreCase = true) ||
+        contains("d.apkpure.com", ignoreCase = true) ||
+        contains("download.apkpure.com", ignoreCase = true) ||
+        contains("/b/apk/", ignoreCase = true) ||
+        contains("/b/xapk/", ignoreCase = true) ||
+        contains("download.apkcombo.com", ignoreCase = true) ||
+        contains("apkcombo.app", ignoreCase = true)
 }
 
 private fun extractCombinedCookies(url: String, referer: String?): String? {

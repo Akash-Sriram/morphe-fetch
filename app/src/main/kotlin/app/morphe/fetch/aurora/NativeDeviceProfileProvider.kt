@@ -1,61 +1,84 @@
 package app.morphe.fetch.aurora
 
+import android.app.ActivityManager
 import android.content.Context
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
-import java.io.InputStream
+import androidx.core.content.pm.PackageInfoCompat
 import java.util.Locale
 import java.util.Properties
 import java.util.TimeZone
 
 internal object NativeDeviceProfileProvider {
 
+    private const val GMS_PACKAGE = "com.google.android.gms"
+    private const val VENDING_PACKAGE = "com.android.vending"
+
+    // Certified defaults tested and working across Google Play API
+    private const val DEFAULT_GSF_VERSION = "203019037"
+    private const val DEFAULT_VENDING_VERSION = "82151710"
+    private const val DEFAULT_VENDING_VERSION_STRING = "21.5.17-21 [0] [PR] 326734551"
+    private const val DEFAULT_GL_VERSION = "196610" // OpenGL ES 3.2
+
     fun getDeviceProperties(context: Context): Properties {
         val properties = Properties()
 
-        // 1. Certified Google Play phone profile baseline.
-        // Google Play restricts apps like Instagram, Netflix, etc. on Tablets (e.g. SM-X216B)
-        // and uncertified OS builds (Android 16 preview), returning AppNotSupported (code=2).
-        // A certified phone profile baseline guarantees full hardware features, OpenGL extensions,
-        // and a certified fingerprint recognized by Google Play.
-        val resourceName = when {
-            Build.DEVICE?.contains("beryllium", ignoreCase = true) == true ||
-                Build.MODEL?.contains("POCO F1", ignoreCase = true) == true -> "gplayapi_poco_f1"
-            Build.MANUFACTURER?.contains("samsung", ignoreCase = true) == true -> "gplayapi_sm_s20_plus"
-            else -> "gplayapi_px_9a"
+        // 1. Base certified defaults to guarantee critical keys exist
+        fillCertifiedBaseline(properties)
+
+        // 2. Hardware configuration & input capabilities
+        runCatching {
+            val config = context.resources.configuration
+            properties.setProperty("TouchScreen", "${config.touchscreen}")
+            properties.setProperty("Keyboard", "${config.keyboard}")
+            properties.setProperty("Navigation", "${config.navigation}")
+            properties.setProperty("ScreenLayout", "${config.screenLayout and 15}")
+            properties.setProperty("HasHardKeyboard", "${config.keyboard == Configuration.KEYBOARD_QWERTY}")
+            properties.setProperty(
+                "HasFiveWayNavigation",
+                "${config.navigation == Configuration.NAVIGATIONHIDDEN_YES}"
+            )
         }
 
-        val stream: InputStream? = runCatching {
-            val resId = context.resources.getIdentifier(resourceName, "raw", context.packageName)
-            if (resId != 0) context.resources.openRawResource(resId) else null
-        }.getOrNull() ?: runCatching {
-            val fallbackId = context.resources.getIdentifier("gplayapi_poco_f1", "raw", context.packageName)
-            if (fallbackId != 0) context.resources.openRawResource(fallbackId) else null
-        }.getOrNull() ?: runCatching {
-            NativeDeviceProfileProvider::class.java.classLoader?.getResourceAsStream("res/raw/$resourceName.properties")
-                ?: NativeDeviceProfileProvider::class.java.classLoader?.getResourceAsStream("res/raw/gplayapi_poco_f1.properties")
-        }.getOrNull()
-
-        if (stream != null) {
-            try {
-                stream.use { properties.load(it) }
-            } catch (_: Exception) {
-            }
+        // 3. Screen display metrics
+        runCatching {
+            val metrics = context.resources.displayMetrics
+            properties.setProperty("Screen.Density", "${metrics.densityDpi}")
+            properties.setProperty("Screen.Width", "${metrics.widthPixels}")
+            properties.setProperty("Screen.Height", "${metrics.heightPixels}")
         }
 
-        if (properties.isEmpty) {
-            fillMinimalCertifiedProperties(properties)
-        }
-
-        // 2. Adapt native device architecture, locale, and timezone dynamically
+        // 4. Supported ABIs / Platforms
         val deviceAbis = runCatching {
-            Build.SUPPORTED_ABIS?.filter { !it.isNullOrBlank() }?.joinToString(separator = ",")
+            Build.SUPPORTED_ABIS?.filter { !it.isNullOrBlank() }?.joinToString(",")
         }.getOrNull().orEmpty()
         if (deviceAbis.isNotBlank()) {
             properties.setProperty("Platforms", deviceAbis)
         }
 
+        // 5. System features & shared libraries
+        runCatching {
+            val features = context.packageManager.systemAvailableFeatures
+                .mapNotNull { it.name }
+                .filter { it.isNotBlank() }
+            if (features.isNotEmpty()) {
+                properties.setProperty("Features", features.joinToString(","))
+            }
+        }
+        runCatching {
+            val sharedLibs = context.packageManager.systemSharedLibraryNames
+                ?.filter { !it.isNullOrBlank() }
+            if (!sharedLibs.isNullOrEmpty()) {
+                properties.setProperty("SharedLibraries", sharedLibs.joinToString(","))
+            }
+        }
+
+        // 6. Locales & TimeZone
         val locales = runCatching {
-            context.assets.locales.mapNotNull { it.replace("-", "_") }.filter { it.isNotBlank() }.joinToString(",")
+            context.assets.locales.mapNotNull { it.replace("-", "_") }
+                .filter { it.isNotBlank() }
+                .joinToString(",")
         }.getOrNull()?.takeIf { it.isNotBlank() } ?: Locale.getDefault().toString()
         properties.setProperty("Locales", locales)
 
@@ -64,16 +87,61 @@ internal object NativeDeviceProfileProvider {
             properties.setProperty("TimeZone", tzId)
         }
 
-        // 3. Overlay real device OS version, display metrics, and hardware identity
-        // This ensures Google Play serves APK variants matching the device's actual Android version (SDK_INT)
-        // rather than newer variants with an incompatible minSdkVersion.
+        // 7. Dynamic OpenGL ES version and extensions
+        runCatching {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            val reqGl = am?.deviceConfigurationInfo?.reqGlEsVersion
+            if (reqGl != null && reqGl > 0) {
+                properties.setProperty("GL.Version", reqGl.toString())
+            }
+        }
+        runCatching {
+            val glExts = EglExtensionProvider.eglExtensions
+            if (glExts.isNotEmpty()) {
+                properties.setProperty("GL.Extensions", glExts.joinToString(","))
+            }
+        }
+
+        // 8. Dynamic Google Play Services (GMS) & Play Store (Vending) inspection
+        runCatching {
+            val pm = context.packageManager
+            runCatching {
+                val gmsInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.getPackageInfo(GMS_PACKAGE, PackageManager.PackageInfoFlags.of(0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.getPackageInfo(GMS_PACKAGE, 0)
+                }
+                val gmsCode = PackageInfoCompat.getLongVersionCode(gmsInfo)
+                if (gmsCode > 0) {
+                    properties.setProperty("GSF.version", gmsCode.toString())
+                }
+            }
+            runCatching {
+                val vendingInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.getPackageInfo(VENDING_PACKAGE, PackageManager.PackageInfoFlags.of(0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.getPackageInfo(VENDING_PACKAGE, 0)
+                }
+                val vendingCode = PackageInfoCompat.getLongVersionCode(vendingInfo)
+                if (vendingCode > 0) {
+                    properties.setProperty("Vending.version", vendingCode.toString())
+                }
+                vendingInfo.versionName?.takeIf { it.isNotBlank() }?.let {
+                    properties.setProperty("Vending.versionString", it)
+                }
+            }
+        }
+
+        // 9. Real device build & OS identifiers
         properties.setProperty("Build.VERSION.SDK_INT", Build.VERSION.SDK_INT.toString())
         Build.VERSION.RELEASE?.takeIf { it.isNotBlank() }?.let {
             properties.setProperty("Build.VERSION.RELEASE", it)
         }
         Build.MODEL?.takeIf { it.isNotBlank() }?.let {
             properties.setProperty("Build.MODEL", it)
-            properties.setProperty("UserReadableName", it)
+            properties.setProperty("UserReadableName", "${Build.MANUFACTURER.orEmpty()} $it".trim())
         }
         Build.MANUFACTURER?.takeIf { it.isNotBlank() }?.let {
             properties.setProperty("Build.MANUFACTURER", it)
@@ -103,35 +171,18 @@ internal object NativeDeviceProfileProvider {
             properties.setProperty("Build.FINGERPRINT", it)
         }
 
-        // Real screen metrics
-        runCatching {
-            val dm = context.resources.displayMetrics
-            properties.setProperty("Screen.Density", dm.densityDpi.toString())
-            properties.setProperty("Screen.Width", dm.widthPixels.toString())
-            properties.setProperty("Screen.Height", dm.heightPixels.toString())
-        }
-
-        // Real features and shared libraries
-        runCatching {
-            val features = context.packageManager.systemAvailableFeatures
-                .mapNotNull { it.name }
-                .filter { it.isNotBlank() }
-            if (features.isNotEmpty()) {
-                properties.setProperty("Features", features.joinToString(","))
-            }
-        }
-        runCatching {
-            val sharedLibs = context.packageManager.systemSharedLibraryNames
-                ?.filter { !it.isNullOrBlank() }
-            if (!sharedLibs.isNullOrEmpty()) {
-                properties.setProperty("SharedLibraries", sharedLibs.joinToString(","))
-            }
+        // 10. Safeguard for uncertified / Huawei devices (prevent Google Play block)
+        val isHuawei = Build.MANUFACTURER.equals("huawei", ignoreCase = true) ||
+            Build.BRAND.equals("huawei", ignoreCase = true) ||
+            Build.BRAND.equals("honor", ignoreCase = true)
+        if (isHuawei) {
+            spoofCertifiedPixelBaseline(properties)
         }
 
         return properties
     }
 
-    private fun fillMinimalCertifiedProperties(properties: Properties) {
+    private fun fillCertifiedBaseline(properties: Properties) {
         properties.apply {
             setProperty("UserReadableName", "POCO F1")
             setProperty("Build.HARDWARE", "qcom")
@@ -152,19 +203,31 @@ internal object NativeDeviceProfileProvider {
             setProperty("ScreenLayout", "2")
             setProperty("HasHardKeyboard", "false")
             setProperty("HasFiveWayNavigation", "false")
-            setProperty("GL.Version", "196610")
+            setProperty("GL.Version", DEFAULT_GL_VERSION)
             setProperty("Screen.Density", "440")
             setProperty("Screen.Width", "1080")
             setProperty("Screen.Height", "2160")
             setProperty("Platforms", "arm64-v8a,armeabi-v7a,armeabi")
-            setProperty("GSF.version", "202414022")
-            setProperty("Vending.version", "81971200")
-            setProperty("Vending.versionString", "19.7.12-all [0] [PR] 305919187")
+            setProperty("GSF.version", DEFAULT_GSF_VERSION)
+            setProperty("Vending.version", DEFAULT_VENDING_VERSION)
+            setProperty("Vending.versionString", DEFAULT_VENDING_VERSION_STRING)
             setProperty("CellOperator", "40411")
             setProperty("SimOperator", "40411")
             setProperty("TimeZone", "Asia/Kolkata")
             setProperty("Roaming", "mobile-notroaming")
             setProperty("Client", "android-google")
         }
+    }
+
+    private fun spoofCertifiedPixelBaseline(properties: Properties) {
+        properties["Build.HARDWARE"] = "lynx"
+        properties["Build.BOOTLOADER"] = "lynx-1.0-9716681"
+        properties["Build.BRAND"] = "google"
+        properties["Build.DEVICE"] = "lynx"
+        properties["Build.MODEL"] = "Pixel 7a"
+        properties["Build.MANUFACTURER"] = "Google"
+        properties["Build.PRODUCT"] = "lynx"
+        properties["Build.ID"] = "TQ2A.230505.002"
+        properties["Build.FINGERPRINT"] = "google/lynx/lynx:13/TQ2A.230505.002/9880290:user/release-keys"
     }
 }

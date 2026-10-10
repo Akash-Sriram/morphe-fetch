@@ -2,6 +2,7 @@ package app.morphe.fetch
 
 import android.content.Context
 import android.util.Log
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,7 @@ internal sealed interface MatchReason {
     data class Description(val patchName: String, val snippet: String) : MatchReason
 }
 
+@Immutable
 internal data class MorpheArchiveData(
     @SerializedName("generatedAt") val generatedAt: String? = null,
     @SerializedName("apps") val apps: List<ArchiveApp> = emptyList(),
@@ -42,6 +44,7 @@ internal data class MorpheArchiveData(
  * time matters because a source can change its patch set between runs, and the
  * index goes on describing the repo as it was at build time.
  */
+@Immutable
 internal data class MorpheArchiveIndex(
     val generatedAt: String? = null,
     val apps: List<ArchiveApp> = emptyList(),
@@ -49,11 +52,13 @@ internal data class MorpheArchiveIndex(
     val repos: List<ArchiveSource> = emptyList()
 )
 
+@Immutable
 internal data class ArchiveApp(
     @SerializedName("packageName") val packageName: String = "",
     @SerializedName("name") val name: String = "",
     @SerializedName("patches") val patches: List<String> = emptyList(),
     @SerializedName("patchDetails") val patchDetails: List<ArchivePatch> = emptyList(),
+    @SerializedName("features") val features: List<ArchiveFeature> = emptyList(),
     @SerializedName("versions") val versions: List<String> = emptyList(),
     @SerializedName("sources") val sources: List<ArchiveSource> = emptyList(),
     @SerializedName("iconColor") val iconColor: String? = null,
@@ -87,6 +92,22 @@ internal data class ArchiveApp(
     @Transient
     var searchBlob: String = ""
         private set
+
+    @Transient
+    private var isDateComputed: Boolean = false
+
+    @Transient
+    var cachedFormattedDate: String? = null
+        private set
+
+    val formattedReleaseDate: String?
+        get() {
+            if (!isDateComputed) {
+                cachedFormattedDate = formatReleaseDate(newestReleaseDate())
+                isDateComputed = true
+            }
+            return cachedFormattedDate
+        }
 
     fun ensureSearchIndex(): ArchiveApp {
         if (!isIndexed) {
@@ -172,11 +193,24 @@ internal data class ArchiveApp(
     }
 }
 
+@Immutable
+internal data class ArchiveFeature(
+    @SerializedName("name") val name: String = "",
+    @SerializedName("category") val category: String = "General Tweaks",
+    @SerializedName("description") val description: String = "",
+    @SerializedName("providerCount") val providerCount: Int = 1,
+    @SerializedName("providers") val providers: List<String> = emptyList(),
+    @SerializedName("isExclusive") val isExclusive: Boolean = false,
+    @SerializedName("aliases") val aliases: List<String> = emptyList()
+)
+
+@Immutable
 internal data class ArchivePatch(
     @SerializedName("name") val name: String = "",
     @SerializedName("description") val description: String? = null
 )
 
+@Immutable
 internal data class ArchiveSourceApp(
     @SerializedName("name") val name: String = "",
     @SerializedName("packageName") val packageName: String = "",
@@ -185,12 +219,16 @@ internal data class ArchiveSourceApp(
     @SerializedName("iconColor") val iconColor: String? = null
 )
 
+@Immutable
 internal data class ArchiveSource(
     @SerializedName("name") val name: String? = null,
     @SerializedName("repo") val repo: String = "",
     @SerializedName("host") val host: String? = null,
     @SerializedName("avatarUrl") val avatarUrl: String? = null,
     @SerializedName("patchCount") val patchCount: Int = 0,
+    @SerializedName("exclusivePatchCount") val exclusivePatchCount: Int = 0,
+    @SerializedName("exclusivePatches") val exclusivePatches: List<String> = emptyList(),
+    @SerializedName("mirrors") val mirrors: List<String> = emptyList(),
     @SerializedName("appCount") val appCount: Int = 0,
     @SerializedName("webUrl") val webUrl: String? = null,
     @SerializedName("addUrl") val addUrl: String? = null,
@@ -254,12 +292,14 @@ internal data class ArchiveSource(
 }
 
 /** A repo's most recent release, as published in its patch bundle. */
+@Immutable
 internal data class ArchiveChanges(
     @SerializedName("title") val title: String = "",
     @SerializedName("date") val date: String? = null
 )
 
 /** One patch set for an app: the repo carrying it, plus any repos carrying the same one. */
+@Immutable
 internal data class ArchiveSourceGroup(
     val primary: ArchiveSource,
     val mirrors: List<ArchiveSource>
@@ -295,6 +335,7 @@ internal fun groupArchiveSources(sources: List<ArchiveSource>): List<ArchiveSour
  * Returns the apps list, or throws so the caller can surface an error state.
  */
 /** How old the index looks to the user, and whether that age is a problem. */
+@Immutable
 internal data class ArchiveFreshness(val label: String, val stale: Boolean)
 
 /**
@@ -414,8 +455,13 @@ private fun parseArchiveTimestamp(value: String?): Long? {
 
 internal object MorpheArchive {
 
-    const val INDEX_URL =
+    const val PROCESSED_INDEX_URL =
+        "https://raw.githubusercontent.com/Akash-Sriram/morphe-fetch/archive-data/data/processed_archive.min.json"
+
+    const val UPSTREAM_INDEX_URL =
         "https://raw.githubusercontent.com/rushiforai/morphe-archive/refs/heads/main/docs/data.json"
+
+    const val INDEX_URL = PROCESSED_INDEX_URL
 
     private const val TAG = "MorpheArchive"
     private const val CONNECT_TIMEOUT_S = 10L
@@ -438,8 +484,17 @@ internal object MorpheArchive {
     fun loadFromDisk(context: Context): MorpheArchiveIndex? {
         return runCatching {
             val file = File(context.filesDir, CACHE_FILE_NAME)
-            if (!file.exists() || file.length() == 0L) return null
-            val body = file.readText()
+            val body = if (file.exists() && file.length() > 0L) {
+                val cached = file.readText()
+                if (cached.contains("\"features\"")) {
+                    cached
+                } else {
+                    // Cache is old raw upstream cache, read bundled processed asset instead
+                    context.assets.open("morphe_archive_bundled.json").bufferedReader().use { it.readText() }
+                }
+            } else {
+                context.assets.open("morphe_archive_bundled.json").bufferedReader().use { it.readText() }
+            }
             val parsed = gson.fromJson(body, MorpheArchiveData::class.java) ?: return null
             parsed.apps.forEach { it.ensureSearchIndex() }
             parsed.repos.forEach { it.ensureSearchIndex() }
@@ -485,35 +540,45 @@ internal object MorpheArchive {
         if (!forceNetwork && context != null && cachedIndex == null) {
             loadFromDisk(context)?.let { return@withContext it }
         }
-        val request = Request.Builder()
-            .url(INDEX_URL)
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36"
-            )
-            .header("Accept", "application/json")
-            .build()
-        http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                error("Index request failed: HTTP ${response.code}")
+        val urlsToTry = listOf(PROCESSED_INDEX_URL, UPSTREAM_INDEX_URL)
+        var body: String? = null
+        for (url in urlsToTry) {
+            val request = Request.Builder()
+                .url(url)
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36"
+                )
+                .header("Accept", "application/json")
+                .build()
+            val result = runCatching {
+                http.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) response.body.string() else null
+                }
+            }.getOrNull()
+            if (!result.isNullOrBlank()) {
+                body = result
+                break
             }
-            val body = response.body.string()
-            if (context != null) {
-                saveToDisk(context, body)
-            }
-            val parsed = gson.fromJson(body, MorpheArchiveData::class.java)
-            parsed.apps.forEach { it.ensureSearchIndex() }
-            parsed.repos.forEach { it.ensureSearchIndex() }
-            val index = MorpheArchiveIndex(
-                generatedAt = parsed.generatedAt,
-                apps = parsed.apps,
-                universalSources = parsed.universalSources,
-                repos = parsed.repos
-            )
-            cachedIndex = index
-            _indexState.value = index
-            index
         }
+        if (body == null) {
+            error("Index request failed across all sources")
+        }
+        if (context != null) {
+            saveToDisk(context, body)
+        }
+        val parsed = gson.fromJson(body, MorpheArchiveData::class.java)
+        parsed.apps.forEach { it.ensureSearchIndex() }
+        parsed.repos.forEach { it.ensureSearchIndex() }
+        val index = MorpheArchiveIndex(
+            generatedAt = parsed.generatedAt,
+            apps = parsed.apps,
+            universalSources = parsed.universalSources,
+            repos = parsed.repos
+        )
+        cachedIndex = index
+        _indexState.value = index
+        index
     }
 
     /**

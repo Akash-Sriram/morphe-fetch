@@ -2,14 +2,17 @@ package app.morphe.fetch
 
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -61,11 +64,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -343,21 +351,23 @@ internal fun AppAvatar(
     iconUrl: String? = null,
     apkUri: String? = null,
     size: Dp = 44.dp,
-    shape: Shape = RoundedCornerShape(MorpheDefaults.CompactCornerRadius)
+    shape: Shape = RoundedCornerShape(MorpheDefaults.CompactCornerRadius),
+    allowWebScraping: Boolean = true
 ) {
     val context = LocalContext.current
     var iconBitmap by remember(packageName, iconUrl, apkUri) {
         mutableStateOf<ImageBitmap?>(AppIconResolver.getCached(packageName))
     }
 
-    LaunchedEffect(packageName, iconUrl, apkUri, isInstalled) {
+    LaunchedEffect(packageName, iconUrl, apkUri, isInstalled, allowWebScraping) {
         if (iconBitmap == null) {
             val resolved = AppIconResolver.resolveIcon(
                 context = context,
                 packageName = packageName,
                 iconUrl = iconUrl,
                 apkUri = apkUri,
-                isInstalled = isInstalled
+                isInstalled = isInstalled,
+                allowWebScraping = allowWebScraping
             )
             if (resolved != null) {
                 iconBitmap = resolved
@@ -374,26 +384,16 @@ internal fun AppAvatar(
                 .clip(shape)
         )
     } else {
-        val colors = listOf(
-            Color(0xFF1A73E8),
-            Color(0xFF4C8DFF),
-            Color(0xFFFBBC04),
-            Color(0xFFEA4335),
-            Color(0xFF4285F4),
-            Color(0xFFF25C1B)
-        )
-        val color = colors[initial.code % colors.size]
-        val tile = MonochromeThemeDefaults.accentColor(color)
         Box(
             modifier = Modifier
                 .size(size)
                 .clip(shape)
-                .background(tile.copy(alpha = 0.85f)),
+                .background(MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = initial.toString(),
-                color = MonochromeThemeDefaults.iconTint(Color.White),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = if (size < 40.dp) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
@@ -406,52 +406,93 @@ internal fun LazyListScrollbar(
     listState: LazyListState,
     modifier: Modifier = Modifier
 ) {
-    val info = listState.layoutInfo
-    val total = info.totalItemsCount
-    val visible = info.visibleItemsInfo.size
-    if (total <= 0 || visible !in 1 until total) return
-    val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
+    var isDragging by remember { mutableStateOf(false) }
     var dragStartY by remember { mutableFloatStateOf(0f) }
     var dragStartIndex by remember { mutableIntStateOf(0) }
-    BoxWithConstraints(modifier = modifier.width(20.dp)) {
-        val containerPx = with(density) { maxHeight.toPx() }
-        val fraction = visible.toFloat() / total.toFloat()
-        val thumbPx = (containerPx * fraction).coerceIn(44f, containerPx)
-        val travelPx = (containerPx - thumbPx).coerceAtLeast(0f)
-        val scrollable = (total - visible).coerceAtLeast(1)
-        val pos = listState.firstVisibleItemIndex.toFloat() / scrollable.toFloat()
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(total, visible, travelPx, scrollable) {
-                    detectVerticalDragGestures(
-                        onDragStart = { offset ->
-                            dragStartY = offset.y
-                            dragStartIndex = listState.firstVisibleItemIndex
-                        },
-                        onVerticalDrag = { change, _ ->
+    val scope = rememberCoroutineScope()
+    var containerHeightPx by remember { mutableFloatStateOf(0f) }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val thumbColor by animateColorAsState(
+        targetValue = if (isDragging) primaryColor else primaryColor.copy(alpha = 0.5f),
+        label = "scrollbar_thumb_color"
+    )
+    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f)
+
+    Box(
+        modifier = modifier
+            .width(16.dp)
+            .fillMaxHeight()
+            .onSizeChanged { containerHeightPx = it.height.toFloat() }
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = { offset ->
+                        isDragging = true
+                        dragStartY = offset.y
+                        dragStartIndex = listState.firstVisibleItemIndex
+                    },
+                    onDragEnd = { isDragging = false },
+                    onDragCancel = { isDragging = false },
+                    onVerticalDrag = { change, _ ->
+                        val info = listState.layoutInfo
+                        val total = info.totalItemsCount
+                        val visible = info.visibleItemsInfo.size
+                        if (total > visible && total > 0 && containerHeightPx > 0f) {
+                            val fraction = (visible.toFloat() / total.toFloat()).coerceIn(0.06f, 1f)
+                            val thumbPx = (containerHeightPx * fraction).coerceIn(48f, containerHeightPx)
+                            val travelPx = (containerHeightPx - thumbPx).coerceAtLeast(1f)
+                            val scrollable = (total - visible).coerceAtLeast(1)
                             val delta = change.position.y - dragStartY
-                            val target = dragStartIndex +
-                                (delta / travelPx * scrollable).toInt()
+                            val target = dragStartIndex + (delta / travelPx * scrollable).toInt()
                             scope.launch {
                                 listState.scrollToItem(target.coerceIn(0, total - 1))
                             }
                         }
-                    )
-                }
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .width(3.dp)
-                    .height(with(density) { thumbPx.toDp() })
-                    .offset { IntOffset(0, (travelPx * pos).toInt()) }
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
-            )
-        }
-    }
+                    }
+                )
+            }
+            .drawWithContent {
+                drawContent()
+                val info = listState.layoutInfo
+                val total = info.totalItemsCount
+                val visible = info.visibleItemsInfo.size
+                if (total <= 0 || visible >= total || containerHeightPx <= 0f) return@drawWithContent
+
+                val fraction = (visible.toFloat() / total.toFloat()).coerceIn(0.06f, 1f)
+                val thumbPx = (containerHeightPx * fraction).coerceIn(48f, containerHeightPx)
+                val travelPx = (containerHeightPx - thumbPx).coerceAtLeast(0f)
+                val scrollable = (total - visible).coerceAtLeast(1)
+
+                val firstIndex = listState.firstVisibleItemIndex
+                val firstOffset = listState.firstVisibleItemScrollOffset
+                val itemHeightPx = info.visibleItemsInfo.firstOrNull()?.size?.toFloat() ?: 1f
+                val smoothIndex = firstIndex + (firstOffset / itemHeightPx).coerceIn(0f, 1f)
+                val pos = (smoothIndex / scrollable.toFloat()).coerceIn(0f, 1f)
+                val thumbY = (travelPx * pos)
+
+                // Track
+                val trackWidth = 4.dp.toPx()
+                val trackRight = size.width - 2.dp.toPx()
+                val trackLeft = trackRight - trackWidth
+                drawRoundRect(
+                    color = trackColor,
+                    topLeft = Offset(trackLeft, 4.dp.toPx()),
+                    size = Size(trackWidth, (containerHeightPx - 8.dp.toPx()).coerceAtLeast(0f)),
+                    cornerRadius = CornerRadius(trackWidth / 2, trackWidth / 2)
+                )
+
+                // Thumb
+                val thumbWidth = if (isDragging) 6.dp.toPx() else 4.dp.toPx()
+                val thumbRight = size.width - 2.dp.toPx()
+                val thumbLeft = thumbRight - thumbWidth
+                drawRoundRect(
+                    color = thumbColor,
+                    topLeft = Offset(thumbLeft, thumbY + 4.dp.toPx()),
+                    size = Size(thumbWidth, (thumbPx - 8.dp.toPx()).coerceAtLeast(16f)),
+                    cornerRadius = CornerRadius(thumbWidth / 2, thumbWidth / 2)
+                )
+            }
+    )
 }
 
 @Composable
@@ -462,46 +503,79 @@ internal fun ScrollStateScrollbar(
     val maxPx = scrollState.maxValue
     if (maxPx <= 0) return
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
+    var isDragging by remember { mutableStateOf(false) }
     var dragStartY by remember { mutableFloatStateOf(0f) }
     var dragStartVal by remember { mutableIntStateOf(0) }
-    BoxWithConstraints(modifier = modifier.width(20.dp)) {
-        val containerPx = with(density) { maxHeight.toPx() }
-        val thumbFraction =
-            (containerPx / (containerPx + maxPx.toFloat())).coerceIn(0.1f, 1f)
-        val thumbPx = (containerPx * thumbFraction).coerceIn(44f, containerPx)
-        val travelPx = (containerPx - thumbPx).coerceAtLeast(0f)
-        val pos = scrollState.value.toFloat() / maxPx.toFloat()
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(maxPx, travelPx) {
-                    detectVerticalDragGestures(
-                        onDragStart = { offset ->
-                            dragStartY = offset.y
-                            dragStartVal = scrollState.value
-                        },
-                        onVerticalDrag = { change, _ ->
+    var containerHeightPx by remember { mutableFloatStateOf(0f) }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val thumbColor by animateColorAsState(
+        targetValue = if (isDragging) primaryColor else primaryColor.copy(alpha = 0.5f),
+        label = "scrollbar_thumb_color"
+    )
+    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f)
+
+    Box(
+        modifier = modifier
+            .width(16.dp)
+            .fillMaxHeight()
+            .onSizeChanged { containerHeightPx = it.height.toFloat() }
+            .pointerInput(maxPx) {
+                detectVerticalDragGestures(
+                    onDragStart = { offset ->
+                        isDragging = true
+                        dragStartY = offset.y
+                        dragStartVal = scrollState.value
+                    },
+                    onDragEnd = { isDragging = false },
+                    onDragCancel = { isDragging = false },
+                    onVerticalDrag = { change, _ ->
+                        if (containerHeightPx > 0f) {
+                            val thumbFraction = (containerHeightPx / (containerHeightPx + maxPx.toFloat())).coerceIn(0.08f, 1f)
+                            val thumbPx = (containerHeightPx * thumbFraction).coerceIn(44f, containerHeightPx)
+                            val travelPx = (containerHeightPx - thumbPx).coerceAtLeast(1f)
                             val delta = change.position.y - dragStartY
                             val target = dragStartVal + (delta / travelPx * maxPx).toInt()
                             scope.launch {
                                 scrollState.scrollTo(target.coerceIn(0, maxPx))
                             }
                         }
-                    )
-                }
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .width(3.dp)
-                    .height(with(density) { thumbPx.toDp() })
-                    .offset { IntOffset(0, (travelPx * pos).toInt()) }
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
-            )
-        }
-    }
+                    }
+                )
+            }
+            .drawWithContent {
+                drawContent()
+                if (containerHeightPx <= 0f || maxPx <= 0) return@drawWithContent
+
+                val thumbFraction = (containerHeightPx / (containerHeightPx + maxPx.toFloat())).coerceIn(0.08f, 1f)
+                val thumbPx = (containerHeightPx * thumbFraction).coerceIn(44f, containerHeightPx)
+                val travelPx = (containerHeightPx - thumbPx).coerceAtLeast(0f)
+                val pos = (scrollState.value.toFloat() / maxPx.toFloat()).coerceIn(0f, 1f)
+                val thumbY = (travelPx * pos)
+
+                // Track
+                val trackWidth = 4.dp.toPx()
+                val trackRight = size.width - 2.dp.toPx()
+                val trackLeft = trackRight - trackWidth
+                drawRoundRect(
+                    color = trackColor,
+                    topLeft = Offset(trackLeft, 4.dp.toPx()),
+                    size = Size(trackWidth, (containerHeightPx - 8.dp.toPx()).coerceAtLeast(0f)),
+                    cornerRadius = CornerRadius(trackWidth / 2, trackWidth / 2)
+                )
+
+                // Thumb
+                val thumbWidth = if (isDragging) 6.dp.toPx() else 4.dp.toPx()
+                val thumbRight = size.width - 2.dp.toPx()
+                val thumbLeft = thumbRight - thumbWidth
+                drawRoundRect(
+                    color = thumbColor,
+                    topLeft = Offset(thumbLeft, thumbY + 4.dp.toPx()),
+                    size = Size(thumbWidth, (thumbPx - 8.dp.toPx()).coerceAtLeast(16f)),
+                    cornerRadius = CornerRadius(thumbWidth / 2, thumbWidth / 2)
+                )
+            }
+    )
 }
 
 @Composable
