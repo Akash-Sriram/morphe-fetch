@@ -21,25 +21,30 @@ internal val MORPHE_MANAGER_PACKAGES = listOf(
 
 internal const val MORPHE_MANAGER_SITE_URL = "https://morphe.software/"
 
-/** Which slice of the archive list to show. */
+/** Which primary section of the archive to browse: Apps or Bundles. */
 internal enum class AppListTab(
     val label: String,
     val icon: ImageVector,
     val contentDescription: String
 ) {
-    All("All", Icons.AutoMirrored.Outlined.ViewList, "All"),
-    Sources("Sources", Icons.Outlined.Layers, "Patch Sources"),
-    Favourites("Liked", Icons.Outlined.FavoriteBorder, "Liked"),
-    Installed("Installed", Icons.Outlined.CheckCircle, "Installed"),
-    NotInstalled("Not installed", Icons.Outlined.Block, "Not installed")
+    Apps("Apps", Icons.AutoMirrored.Outlined.ViewList, "Apps"),
+    Bundles("Bundles", Icons.Outlined.Layers, "Patch Bundles")
+}
+
+/** Status filter for apps in the archive list. */
+internal enum class AppStatusFilter(
+    val label: String,
+    val icon: ImageVector
+) {
+    Installed("Installed", Icons.Outlined.CheckCircle),
+    NotInstalled("Not installed", Icons.Outlined.Block),
+    Favourites("Liked", Icons.Outlined.FavoriteBorder)
 }
 
 /** How the archive list is ordered. */
 internal enum class AppSort(val label: String, val icon: ImageVector, val rotation: Float = 0f) {
     AZ("A–Z", Icons.Outlined.SortByAlpha),
-    ZA("Z–A", Icons.Outlined.SortByAlpha, 180f),
-    Sources("Sources", Icons.Outlined.Extension),
-    Newest("Newest", Icons.Outlined.History)
+    ZA("Z–A", Icons.Outlined.SortByAlpha, 180f)
 }
 
 /**

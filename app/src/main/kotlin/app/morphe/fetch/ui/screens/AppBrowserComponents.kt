@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,6 +47,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.surfaceColorAtElevation
@@ -99,8 +101,15 @@ internal fun AppDisclaimerBanner() {
 internal fun AppSearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
+    tab: AppListTab = AppListTab.Apps,
     modifier: Modifier = Modifier
 ) {
+    val placeholderText = if (tab == AppListTab.Bundles) {
+        "Search patch bundles or authors…"
+    } else {
+        "Search apps, patches, or bundles…"
+    }
+
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
@@ -112,27 +121,43 @@ internal fun AppSearchBar(
         ),
         placeholder = {
             Text(
-                "Search apps, patches, or sources (e.g. De-Vanced)",
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                text = placeholderText,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         },
         leadingIcon = {
             Icon(
                 imageVector = Icons.Outlined.Search,
-                contentDescription = null
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
             )
         },
         trailingIcon = {
             if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }) {
+                IconButton(
+                    onClick = { onQueryChange("") },
+                    modifier = Modifier.size(36.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Outlined.Close,
                         contentDescription = "Clear search",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
                 }
             }
-        }
+        },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+        )
     )
 }
 
@@ -141,27 +166,28 @@ internal fun ArchiveFilterRow(
     tab: AppListTab,
     onTabSelect: (AppListTab) -> Unit,
     sort: AppSort,
-    onSortSelect: (AppSort) -> Unit
+    onSortSelect: (AppSort) -> Unit,
+    statusFilter: AppStatusFilter?,
+    onStatusFilterSelect: (AppStatusFilter?) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AppDisclaimerBanner()
-        // Row 1: Category Filter Chips
+        // Row 1: Exactly two primary filters: Apps vs Bundles
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AppListTab.entries.forEach { t ->
                 MorpheFilterChip(
                     selected = tab == t,
                     onClick = { onTabSelect(t) },
-                    label = t.label
+                    label = t.label,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
-        // Row 2: Sort Option Chips
+
+        // Row 2: Sort (A–Z, Z–A) + Installed / Not installed / Liked filters
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -181,6 +207,23 @@ internal fun ArchiveFilterRow(
                     onClick = { onSortSelect(s) },
                     label = s.label
                 )
+            }
+
+            if (tab == AppListTab.Apps) {
+                MorpheVerticalDivider(
+                    modifier = Modifier
+                        .height(18.dp)
+                        .padding(horizontal = 4.dp)
+                )
+                AppStatusFilter.entries.forEach { f ->
+                    MorpheFilterChip(
+                        selected = statusFilter == f,
+                        onClick = {
+                            onStatusFilterSelect(if (statusFilter == f) null else f)
+                        },
+                        label = f.label
+                    )
+                }
             }
         }
     }

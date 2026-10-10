@@ -76,8 +76,9 @@ internal fun AppBrowserScreen(
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<ArchiveApp?>(null) }
     var loadKey by remember { mutableIntStateOf(0) }
-    var tab by remember { mutableStateOf(AppListTab.All) }
+    var tab by remember { mutableStateOf(AppListTab.Apps) }
     var sort by remember { mutableStateOf(AppSort.AZ) }
+    var statusFilter by remember { mutableStateOf<AppStatusFilter?>(null) }
     val context = LocalContext.current
     var favourites by remember { mutableStateOf<Set<String>>(emptySet()) }
     var installedPackages by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -135,7 +136,7 @@ internal fun AppBrowserScreen(
     var filteredSources by remember { mutableStateOf<List<ArchiveSource>>(emptyList()) }
     var matchingSourcesForSearch by remember { mutableStateOf<List<ArchiveSource>>(emptyList()) }
 
-    LaunchedEffect(apps, sources, query, tab, sort, favourites, installedPackages) {
+    LaunchedEffect(apps, sources, query, tab, sort, statusFilter, favourites, installedPackages) {
         val loadedApps = apps
         val loadedSources = sources
         if (loadedApps == null && loadedSources == null) {
@@ -151,7 +152,7 @@ internal fun AppBrowserScreen(
         withContext(Dispatchers.Default) {
             val qLower = q.lowercase(Locale.US)
 
-            // Sources filtering & ranking
+            // Sources / Bundles filtering & ranking
             val matchedSources = (loadedSources ?: emptyList())
                 .filter { q.isBlank() || it.matchesQuery(qLower) }
                 .let { sList ->
@@ -164,7 +165,6 @@ internal fun AppBrowserScreen(
                         when (sort) {
                             AppSort.AZ -> sList.sortedBy { it.displayName.lowercase(Locale.US) }
                             AppSort.ZA -> sList.sortedByDescending { it.displayName.lowercase(Locale.US) }
-                            AppSort.Sources, AppSort.Newest -> sList.sortedByDescending { it.actualPatchCount }
                         }
                     }
                 }
@@ -172,7 +172,7 @@ internal fun AppBrowserScreen(
             matchingSourcesForSearch = if (q.isNotBlank()) matchedSources else emptyList()
 
             // Apps filtering & ranking
-            val matchedApps = if (tab == AppListTab.Sources) {
+            val matchedApps = if (tab == AppListTab.Bundles) {
                 emptyList()
             } else {
                 (loadedApps ?: emptyList())
@@ -180,12 +180,11 @@ internal fun AppBrowserScreen(
                         q.isBlank() || app.matchesQuery(qLower)
                     }
                     .filter { app ->
-                        when (tab) {
-                            AppListTab.All -> true
-                            AppListTab.Sources -> false
-                            AppListTab.Favourites -> app.packageName in favourites
-                            AppListTab.Installed -> app.packageName in installedPackages
-                            AppListTab.NotInstalled -> app.packageName !in installedPackages
+                        when (statusFilter) {
+                            null -> true
+                            AppStatusFilter.Installed -> app.packageName in installedPackages
+                            AppStatusFilter.NotInstalled -> app.packageName !in installedPackages
+                            AppStatusFilter.Favourites -> app.packageName in favourites
                         }
                     }
                     .let { matches ->
@@ -201,11 +200,6 @@ internal fun AppBrowserScreen(
                             when (sort) {
                                 AppSort.AZ -> matches.sortedBy { it.name.lowercase(Locale.US) }
                                 AppSort.ZA -> matches.sortedByDescending { it.name.lowercase(Locale.US) }
-                                AppSort.Sources -> matches.sortedByDescending { it.sourceCount }
-                                AppSort.Newest -> matches
-                                    .map { app -> app.newestReleaseDate().orEmpty() to app }
-                                    .sortedByDescending { it.first }
-                                    .map { it.second }
                             }
                         }
                     }
@@ -247,8 +241,8 @@ internal fun AppBrowserScreen(
                 val fresh = freshness
                 Text(
                     text = buildString {
-                        if (tab == AppListTab.Sources) {
-                            append(sources?.let { "${it.size} patch sources" } ?: "Morphe patch sources")
+                        if (tab == AppListTab.Bundles) {
+                            append(sources?.let { "${it.size} patch bundles" } ?: "Morphe patch bundles")
                         } else {
                             append(apps?.let { "${it.size} apps with patches" } ?: "Morphe patch archive")
                         }
@@ -303,6 +297,8 @@ internal fun AppBrowserScreen(
                 onTabSelect = { tab = it },
                 sort = sort,
                 onSortSelect = { sort = it },
+                statusFilter = statusFilter,
+                onStatusFilterSelect = { statusFilter = it },
                 filteredApps = filteredApps,
                 filteredSources = filteredSources,
                 matchingSourcesForSearch = matchingSourcesForSearch,
@@ -433,6 +429,8 @@ private fun MasterListPane(
     onTabSelect: (AppListTab) -> Unit,
     sort: AppSort,
     onSortSelect: (AppSort) -> Unit,
+    statusFilter: AppStatusFilter?,
+    onStatusFilterSelect: (AppStatusFilter?) -> Unit,
     filteredApps: List<ArchiveApp>,
     filteredSources: List<ArchiveSource>,
     matchingSourcesForSearch: List<ArchiveSource>,
@@ -454,7 +452,8 @@ private fun MasterListPane(
     ) {
         AppSearchBar(
             query = query,
-            onQueryChange = onQueryChange
+            onQueryChange = onQueryChange,
+            tab = tab
         )
 
         val loaded = apps != null || sources != null
@@ -490,12 +489,14 @@ private fun MasterListPane(
                     tab = tab,
                     onTabSelect = onTabSelect,
                     sort = sort,
-                    onSortSelect = onSortSelect
+                    onSortSelect = onSortSelect,
+                    statusFilter = statusFilter,
+                    onStatusFilterSelect = onStatusFilterSelect
                 )
 
-                if (tab == AppListTab.Sources) {
+                if (tab == AppListTab.Bundles) {
                     if (filteredSources.isEmpty()) {
-                        InfoCard("No patch sources match \"$query\".")
+                        InfoCard("No patch bundles match \"$query\".")
                     } else {
                         Box(
                             modifier = Modifier
@@ -560,13 +561,13 @@ private fun MasterListPane(
                     val hasSources = query.isNotBlank() && matchingSourcesForSearch.isNotEmpty()
                     if (filteredApps.isEmpty() && !hasSources) {
                         InfoCard(
-                            when (tab) {
-                                AppListTab.Favourites ->
+                            when (statusFilter) {
+                                AppStatusFilter.Favourites ->
                                     "No liked apps yet. Tap the heart on any app to pin it here."
-                                AppListTab.Installed -> "No patched apps in the index are installed."
-                                AppListTab.NotInstalled ->
+                                AppStatusFilter.Installed -> "No patched apps in the index are installed."
+                                AppStatusFilter.NotInstalled ->
                                     "Every app in the index is installed on this device."
-                                else -> "No apps match \"$query\"."
+                                null -> "No apps match \"$query\"."
                             }
                         )
                     } else {
@@ -594,13 +595,13 @@ private fun MasterListPane(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(
-                                                    text = "Matching Sources (${matchingSourcesForSearch.size})",
+                                                    text = "Matching Bundles (${matchingSourcesForSearch.size})",
                                                     style = MaterialTheme.typography.titleSmall,
                                                     fontWeight = FontWeight.Bold,
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
                                                 Text(
-                                                    text = "View all in Sources tab",
+                                                    text = "View all in Bundles tab",
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
