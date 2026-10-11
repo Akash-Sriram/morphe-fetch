@@ -4,6 +4,12 @@ on:
   schedule:
     # Run daily at 06:00 UTC
     - cron: '0 6 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/update_archive.yml'
+      - 'scripts/process_archive.py'
   workflow_dispatch:
   repository_dispatch:
     types: [upstream-archive-updated]
@@ -34,16 +40,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Check if archive-data branch exists
-          git fetch origin archive-data:archive-data || git checkout --orphan archive-data
-          git checkout archive-data
-          
+          TMP_DIR=$(mktemp -d)
+          mv processed_archive.json "$TMP_DIR/"
+          mv processed_archive.min.json "$TMP_DIR/"
+
+          # Check if archive-data branch exists on remote
+          if git ls-remote --exit-code --heads origin archive-data >/dev/null 2>&1; then
+            git fetch origin archive-data:archive-data
+            git checkout archive-data
+          else
+            git checkout --orphan archive-data
+            git rm -rf . || true
+          fi
+
           mkdir -p data
-          mv processed_archive.json data/processed_archive.json
-          mv processed_archive.min.json data/processed_archive.min.json
-          
+          mv "$TMP_DIR/processed_archive.json" data/processed_archive.json
+          mv "$TMP_DIR/processed_archive.min.json" data/processed_archive.min.json
+          rm -rf "$TMP_DIR"
+
           git add data/processed_archive.json data/processed_archive.min.json
-          
+
           if git diff --staged --quiet; then
             echo "No changes in archive data detected."
           else
