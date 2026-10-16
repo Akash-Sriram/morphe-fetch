@@ -738,9 +738,8 @@ private fun AuroraAccountDialog(
                                         null,
                                         null,
                                         tokenProvider.getSupportedAccountTypes(),
-                                        false,
                                         null,
-                                        MicroGAccountTokenProvider.GOOGLE_PLAY_AUTH_TOKEN_TYPE,
+                                        null,
                                         null,
                                         null
                                     )

@@ -41,8 +41,8 @@ internal class MicroGAccountTokenProvider(
     companion object {
         private const val TAG = "MicroGTokenProvider"
         const val REVANCED_ACCOUNT_TYPE = "app.revanced"
-        const val OFFICIAL_MICROG_ACCOUNT_TYPE = "org.microg.gms"
-        val SUPPORTED_ACCOUNT_TYPES = arrayOf(REVANCED_ACCOUNT_TYPE, OFFICIAL_MICROG_ACCOUNT_TYPE)
+        const val OFFICIAL_MICROG_ACCOUNT_TYPE = "com.google"
+        val SUPPORTED_ACCOUNT_TYPES = arrayOf(REVANCED_ACCOUNT_TYPE, OFFICIAL_MICROG_ACCOUNT_TYPE, "org.microg.gms")
         const val GOOGLE_PLAY_AUTH_TOKEN_TYPE = "oauth2:https://www.googleapis.com/auth/googleplay"
         const val PACKAGE_NAME_PLAY_STORE = "com.android.vending"
         const val DISPENSER_URL = "https://auroraoss.com/api/auth"
@@ -119,10 +119,39 @@ internal class MicroGAccountTokenProvider(
 
     fun getAvailableAccounts(): List<Account> {
         val accountManager = AccountManager.get(context)
-        return buildList {
-            addAll(runCatching { accountManager.getAccountsByType(REVANCED_ACCOUNT_TYPE) }.getOrNull().orEmpty())
-            addAll(runCatching { accountManager.getAccountsByType(OFFICIAL_MICROG_ACCOUNT_TYPE) }.getOrNull().orEmpty())
+        // 1. Prime account visibility via MicroG's AccountContentProvider
+        val providerAuthorities = listOf(
+            "app.revanced.android.gms.auth.accounts",
+            "org.microg.gms.auth.accounts",
+            "com.google.android.gms.auth.accounts"
+        )
+        val providerAccounts = mutableListOf<Account>()
+        for (authority in providerAuthorities) {
+            for (type in SUPPORTED_ACCOUNT_TYPES) {
+                runCatching {
+                    val uri = android.net.Uri.parse("content://$authority")
+                    val bundle = context.contentResolver.call(uri, "get_accounts", type, null)
+                    val parcelables = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        bundle?.getParcelableArray("accounts", Account::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        bundle?.getParcelableArray("accounts")?.filterIsInstance<Account>()?.toTypedArray()
+                    }
+                    if (!parcelables.isNullOrEmpty()) {
+                        providerAccounts.addAll(parcelables)
+                    }
+                }
+            }
         }
+
+        val accounts = buildList {
+            addAll(providerAccounts)
+            for (type in SUPPORTED_ACCOUNT_TYPES) {
+                addAll(runCatching { accountManager.getAccountsByType(type) }.getOrNull().orEmpty())
+            }
+        }.distinctBy { "${it.type}:${it.name.lowercase(Locale.ROOT)}" }
+        Log.i(TAG, "getAvailableAccounts found ${accounts.size} account(s): ${accounts.map { "${it.name} (${it.type})" }}")
+        return accounts
     }
 
     /**
@@ -141,7 +170,7 @@ internal class MicroGAccountTokenProvider(
 
         val deviceProps = NativeDeviceProfileProvider.getDeviceProperties(context)
         val locale = Locale.getDefault()
-        val authData = AuthHelper.using(httpClient).build(
+        val authData = AuthHelper.build(
             email = email,
             token = freshToken,
             tokenType = AuthHelper.Token.AUTH,
@@ -173,7 +202,7 @@ internal class MicroGAccountTokenProvider(
                     AuthHelper.Token.AUTH
                 }
                 try {
-                    val authData = AuthHelper.using(httpClient).build(
+                    val authData = AuthHelper.build(
                         email = configuredEmail,
                         token = configuredToken,
                         tokenType = tokenType,
@@ -196,11 +225,13 @@ internal class MicroGAccountTokenProvider(
             try {
                 return@withContext refreshAccountToken(activity)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to auto-refresh token for $configuredEmail: ${e.message}", e)
-                throw IllegalStateException(
-                    "Google Play session for $configuredEmail has expired. Please re-authenticate in Settings.",
-                    e
-                )
+                Log.w(TAG, "Could not auto-refresh token for $configuredEmail: ${e.message}. Falling back to anonymous session.")
+                if (activity != null) {
+                    throw IllegalStateException(
+                        "Google Play session for $configuredEmail has expired. Please re-authenticate in Settings.",
+                        e
+                    )
+                }
             }
         }
 
@@ -232,7 +263,7 @@ internal class MicroGAccountTokenProvider(
             val account = accounts.first()
             try {
                 val token = fetchAccountToken(account, activity)
-                val authData = AuthHelper.using(httpClient).build(
+                val authData = AuthHelper.build(
                     email = account.name,
                     token = token,
                     tokenType = AuthHelper.Token.AUTH,
@@ -299,6 +330,33 @@ internal class MicroGAccountTokenProvider(
                             if (!token.isNullOrBlank()) {
                                 if (continuation.isActive) continuation.resume(token)
                                 return
+                            }
+
+                            val intent = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                                result.getParcelable(AccountManager.KEY_INTENT, android.content.Intent::class.java)
+                            } else {
+                                @Suppress("DEPRECATION")
+                                result.getParcelable(AccountManager.KEY_INTENT) as? android.content.Intent
+                            }
+
+                            if (intent != null) {
+                                if (activity != null) {
+                                    Log.i(TAG, "Launching MicroG consent intent for ${account.name}...")
+                                    runCatching { activity.startActivity(intent) }
+                                    if (continuation.isActive) {
+                                        continuation.resumeWithException(
+                                            IllegalStateException("Please grant MicroG permission in the opened prompt, then tap login again.")
+                                        )
+                                    }
+                                    return
+                                } else {
+                                    if (continuation.isActive) {
+                                        continuation.resumeWithException(
+                                            IllegalStateException("MicroG consent required for ${account.name}. Please select this account in Morphe Fetch Settings to authorize.")
+                                        )
+                                    }
+                                    return
+                                }
                             }
 
                             // MicroG-RE AskPackageOverrideActivity returns "retry" upon user granting consent
