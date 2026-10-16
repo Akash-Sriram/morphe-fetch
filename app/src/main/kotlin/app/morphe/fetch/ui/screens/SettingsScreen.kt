@@ -124,7 +124,6 @@ private enum class SettingsSection(
     PREFERENCES("Preferences", Icons.Outlined.Tune),
     SOURCES("Download Sources", Icons.Outlined.Dns),
     HISTORY("Download History", Icons.Outlined.History),
-    LOGS("Activity Logs", Icons.Outlined.BugReport),
     UPDATES("Updates & About", Icons.Outlined.Download)
 }
 
@@ -458,6 +457,7 @@ private fun AuroraAccountDialog(
     var inputEmail by rememberSaveable { mutableStateOf(settings.auroraEmail.orEmpty()) }
     var inputToken by rememberSaveable { mutableStateOf(settings.auroraAuthToken.orEmpty()) }
     var inputType by rememberSaveable { mutableStateOf(settings.auroraTokenType) }
+    var inputCustomDispenser by rememberSaveable { mutableStateOf(settings.auroraCustomDispenser.orEmpty()) }
     var isAuthenticating by remember { mutableStateOf(false) }
 
     val tokenProvider = remember {
@@ -576,6 +576,31 @@ private fun AuroraAccountDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        HelperOutlinedButton(
+                            text = "Refresh",
+                            onClick = {
+                                isAuthenticating = true
+                                lifecycleScope.launch {
+                                    try {
+                                        val freshAuth = withContext(Dispatchers.IO) {
+                                            tokenProvider.refreshAccountToken(hostActivity ?: context.findActivity())
+                                        }
+                                        onSettingsChange(
+                                            settings.copy(
+                                                auroraAuthToken = freshAuth.authToken,
+                                                auroraTokenType = "AUTH"
+                                            )
+                                        )
+                                        Toast.makeText(context, "Session refreshed successfully", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Refresh failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                    } finally {
+                                        isAuthenticating = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
                         HelperOutlinedButton(
                             text = "Edit Token",
                             onClick = {
@@ -736,6 +761,43 @@ private fun AuroraAccountDialog(
                         }
                     }
                 }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Custom Token Dispenser (BYOD)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Optional fallback endpoint for anonymous sessions when public servers are busy.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = inputCustomDispenser,
+                            onValueChange = {
+                                inputCustomDispenser = it
+                                onSettingsChange(
+                                    settings.copy(
+                                        auroraCustomDispenser = it.trim().takeIf { s -> s.isNotBlank() }
+                                    )
+                                )
+                            },
+                            placeholder = { Text("https://auroraoss.com/api/auth") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -829,8 +891,6 @@ private fun AuroraAccountDialog(
 internal fun HelperSettingsScreen(
     settings: HelperSettings,
     onSettingsChange: (HelperSettings) -> Unit,
-    logs: List<RequestLogEntry>,
-    onClearLogs: () -> Unit,
     historyEntries: List<DownloadHistoryEntry>,
     onOpenHistoryEntry: (DownloadHistoryEntry) -> Unit,
     onShareHistoryEntry: (DownloadHistoryEntry) -> Unit,
@@ -852,7 +912,6 @@ internal fun HelperSettingsScreen(
     var policyDialog by remember { mutableStateOf(false) }
     var sourcesDialog by remember { mutableStateOf(false) }
     var historyDialog by remember { mutableStateOf(false) }
-    var logsDialog by remember { mutableStateOf(false) }
     val locations = DownloadLocation.entries
     val policies = NetworkPolicy.entries
     val enabledSources = remember(settings.disabledSources) {
@@ -948,26 +1007,6 @@ internal fun HelperSettingsScreen(
                         onClear = onClearHistory,
                         onOpen = onOpenHistoryEntry,
                         onShare = onShareHistoryEntry
-                    )
-                }
-            }
-        )
-    }
-
-    if (!isExpanded && logsDialog) {
-        AlertDialog(
-            onDismissRequest = { logsDialog = false },
-            confirmButton = {
-                HelperButton(text = "Close", onClick = { logsDialog = false })
-            },
-            title = {
-                Text("Activity Logs", fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Box(modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
-                    RequestLogsCard(
-                        logs = logs,
-                        onClearLogs = onClearLogs
                     )
                 }
             }
@@ -1110,7 +1149,6 @@ internal fun HelperSettingsScreen(
                                         SettingsSection.PREFERENCES -> "Theme, cache & network"
                                         SettingsSection.SOURCES -> "${enabledSources.size} of ${DownloadSource.entries.size} active"
                                         SettingsSection.HISTORY -> "${historyEntries.size} APKs"
-                                        SettingsSection.LOGS -> "${logs.size} Events"
                                         SettingsSection.UPDATES -> when (updateState) {
                                             is UpdateState.Available -> "Update available!"
                                             is UpdateState.Checking -> "Checking..."
@@ -1228,12 +1266,6 @@ internal fun HelperSettingsScreen(
                                 onClear = onClearHistory,
                                 onOpen = onOpenHistoryEntry,
                                 onShare = onShareHistoryEntry
-                            )
-                        }
-                        SettingsSection.LOGS -> {
-                            RequestLogsCard(
-                                logs = logs,
-                                onClearLogs = onClearLogs
                             )
                         }
                         SettingsSection.UPDATES -> {
@@ -1519,28 +1551,6 @@ internal fun HelperSettingsScreen(
                     MorpheSectionTitle(text = "Diagnostics & Logs", icon = Icons.Outlined.BugReport)
                     SectionCard {
                         Column {
-                            // Activity Logs
-                            SettingsRow(
-                                icon = Icons.Outlined.BugReport,
-                                title = "Activity Logs",
-                                subtitle = "${logs.size} recorded events • Network & resolution trace",
-                                trailing = {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        MorpheStatusBadge(
-                                            text = "${logs.size} Events",
-                                            tone = SemanticTone.Neutral
-                                        )
-                                        ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)
-                                    }
-                                },
-                                onClick = { logsDialog = true }
-                            )
-
-                            MorpheDivider(fullWidth = true)
-
                             // Log to Logcat
                             SettingsSwitchItem(
                                 icon = Icons.Outlined.Bolt,

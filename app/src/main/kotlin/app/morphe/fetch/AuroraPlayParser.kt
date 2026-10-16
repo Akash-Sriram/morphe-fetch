@@ -88,29 +88,30 @@ internal class AuroraPlayParser(
             tokenProvider.getAuthData()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to obtain auth data for Google Play", e)
-            return@withContext emptyList()
+            throw e
         }
 
         try {
             findCandidatesInternal(request, option, authData)
         } catch (e: GooglePlayException.AuthException) {
             Log.w(TAG, "AuthException encountered in findCandidates for ${request.packageName}, refreshing token and retrying: ${e.message}")
-            tokenProvider.invalidateToken()
             val freshAuthData = try {
-                tokenProvider.getAuthData()
-            } catch (reAuthEx: Exception) {
-                Log.e(TAG, "Re-authentication failed after AuthException", reAuthEx)
-                return@withContext emptyList()
+                tokenProvider.refreshAccountToken()
+            } catch (refreshEx: Exception) {
+                tokenProvider.invalidateToken()
+                try {
+                    tokenProvider.getAuthData()
+                } catch (reAuthEx: Exception) {
+                    Log.e(TAG, "Re-authentication failed after AuthException", reAuthEx)
+                    throw reAuthEx
+                }
             }
             try {
                 findCandidatesInternal(request, option, freshAuthData)
             } catch (retryEx: Exception) {
                 Log.e(TAG, "Retry failed after re-auth for ${request.packageName}", retryEx)
-                emptyList()
+                throw retryEx
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Unexpected error in findCandidates for ${request.packageName}", e)
-            emptyList()
         }
     }
 
@@ -392,13 +393,16 @@ internal class AuroraPlayParser(
                 Log.w(TAG, "Google Play purchase/delivery failed for ${request.packageName} vc=$versionCode", e)
                 return null
             } catch (e: GooglePlayException.AuthException) {
-                Log.w(TAG, "Auth error during purchase for ${request.packageName} — invalidating session and retrying (attempt $attempt/$maxAttempts)", e)
-                tokenProvider.invalidateAuth()
+                Log.w(TAG, "Auth error during purchase for ${request.packageName} — refreshing token and retrying (attempt $attempt/$maxAttempts)", e)
                 if (attempt < maxAttempts) {
                     try {
-                        currentAuthData = tokenProvider.getAuthData()
+                        currentAuthData = runCatching { tokenProvider.refreshAccountToken() }
+                            .getOrElse {
+                                tokenProvider.invalidateToken()
+                                tokenProvider.getAuthData()
+                            }
                     } catch (authEx: Exception) {
-                        Log.e(TAG, "Re-auth failed, giving up", authEx)
+                        Log.e(TAG, "Re-auth failed during purchase, giving up", authEx)
                         return null
                     }
                     continue

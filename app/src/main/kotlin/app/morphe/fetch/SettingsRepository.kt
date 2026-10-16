@@ -30,7 +30,8 @@ internal data class HelperSettings(
     val preferredSource: DownloadSource? = null,
     val auroraEmail: String? = null,
     val auroraAuthToken: String? = null,
-    val auroraTokenType: String = "AUTH"
+    val auroraTokenType: String = "AUTH",
+    val auroraCustomDispenser: String? = null
 )
 
 internal enum class ThemeMode(
@@ -139,7 +140,8 @@ internal fun Context.loadHelperSettings(): HelperSettings {
             ?.let { name -> DownloadSource.entries.firstOrNull { it.name == name } },
         auroraEmail = prefs.getString("aurora_email", null),
         auroraAuthToken = prefs.getString("aurora_auth_token", null),
-        auroraTokenType = prefs.getString("aurora_token_type", "AUTH") ?: "AUTH"
+        auroraTokenType = prefs.getString("aurora_token_type", "AUTH") ?: "AUTH",
+        auroraCustomDispenser = prefs.getString("aurora_custom_dispenser", null)?.takeIf { it.isNotBlank() }
     )
     logcatLoggingEnabled = settings.logcatLogging
     return settings
@@ -160,8 +162,23 @@ internal fun Context.saveHelperSettings(settings: HelperSettings) {
         .putString("aurora_email", settings.auroraEmail)
         .putString("aurora_auth_token", settings.auroraAuthToken)
         .putString("aurora_token_type", settings.auroraTokenType)
+        .putString("aurora_custom_dispenser", settings.auroraCustomDispenser)
         .apply()
     syncNightModeWithSystem(settings.themeMode)
+}
+
+internal fun Context.updateAuroraToken(
+    token: String?,
+    email: String? = null,
+    tokenType: String = "AUTH"
+) {
+    val editor = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+    editor.putString("aurora_auth_token", token)
+    editor.putString("aurora_token_type", tokenType)
+    if (email != null) {
+        editor.putString("aurora_email", email)
+    }
+    editor.apply()
 }
 
 internal fun Context.syncNightModeWithSystem(themeMode: ThemeMode) {

@@ -317,7 +317,7 @@ private const val CAPTCHA_BRIDGE_NAME = "Android"
 private const val CAPTCHA_CAPTURE_JS = """
 (function () {
   var re = /\.(apk|apks|apkm|xapk)(\?|#|$)/i;
-  var dlPhp = /download\.php\?.*id=\d+/i;
+  var dlPhp = /download\.php(\?|#|$)/i;
   function looksLike(u) {
     if (!u) return false;
     try { u = decodeURIComponent(u); } catch (e) {}
@@ -325,7 +325,8 @@ private const val CAPTCHA_CAPTURE_JS = """
     if (u.indexOf('dw.uptodown.com') !== -1 || u.indexOf('dw.uptodown.net') !== -1) return true;
     if (u.indexOf('d.apkpure.com') !== -1 || u.indexOf('download.apkpure.com') !== -1 || u.indexOf('/b/apk/') !== -1 || u.indexOf('/b/xapk/') !== -1) return true;
     if (u.indexOf('download.apkcombo.com') !== -1 || u.indexOf('apkcombo.app') !== -1) return true;
-    return re.test(u) || /filename[^.]*\.(apk|apks|apkm|xapk)/i.test(u) || dlPhp.test(u) || /download\.php\?id=\d+/i.test(u);
+    if (u.indexOf('download.php') !== -1 || u.indexOf('/download/?key=') !== -1) return true;
+    return re.test(u) || /filename[^.]*\.(apk|apks|apkm|xapk)/i.test(u) || dlPhp.test(u);
   }
   
   document.addEventListener('click', function (e) {
@@ -344,23 +345,25 @@ private const val CAPTCHA_CAPTURE_JS = """
 """
 
 internal fun String.looksLikeApkDownload(): Boolean {
-    val decoded = Uri.decode(this).lowercase(Locale.US)
+    val decoded = runCatching { Uri.decode(this) }.getOrNull()
+        ?: runCatching { java.net.URLDecoder.decode(this, "UTF-8") }.getOrDefault(this)
+    val lower = decoded.lowercase(Locale.US)
     // Never capture Uptodown's store installer stub (e.g. uptodown-com.reddit.frontpage.apk)
-    if (decoded.contains("uptodown-") && decoded.contains(".apk")) {
+    if (lower.contains("uptodown-") && lower.contains(".apk")) {
         return false
     }
-    return Regex("""\.(apk|apks|apkm|xapk)(\?|#|$)""").containsMatchIn(decoded) ||
-        Regex("""filename[^.]*\.(apk|apks|apkm|xapk)""").containsMatchIn(decoded) ||
-        Regex("""download\.php\?.*id=\d+""").containsMatchIn(decoded) ||
-        Regex("""download\.php\?id=\d+""").containsMatchIn(decoded) ||
-        contains("dw.uptodown.com", ignoreCase = true) ||
-        contains("dw.uptodown.net", ignoreCase = true) ||
-        contains("d.apkpure.com", ignoreCase = true) ||
-        contains("download.apkpure.com", ignoreCase = true) ||
-        contains("/b/apk/", ignoreCase = true) ||
-        contains("/b/xapk/", ignoreCase = true) ||
-        contains("download.apkcombo.com", ignoreCase = true) ||
-        contains("apkcombo.app", ignoreCase = true)
+    return Regex("""\.(apk|apks|apkm|xapk)(\?|#|$)""").containsMatchIn(lower) ||
+        Regex("""filename[^.]*\.(apk|apks|apkm|xapk)""").containsMatchIn(lower) ||
+        lower.contains("download.php") ||
+        lower.contains("/download/?key=") ||
+        lower.contains("dw.uptodown.com") ||
+        lower.contains("dw.uptodown.net") ||
+        lower.contains("d.apkpure.com") ||
+        lower.contains("download.apkpure.com") ||
+        lower.contains("/b/apk/") ||
+        lower.contains("/b/xapk/") ||
+        lower.contains("download.apkcombo.com") ||
+        lower.contains("apkcombo.app")
 }
 
 private fun extractCombinedCookies(url: String, referer: String?): String? {
@@ -407,113 +410,126 @@ private fun buildAutoPilotJs(targetVersion: String, preferredAbi: String): Strin
     val escapedAbi = preferredAbi.replace("\"", "\\\"")
     return """
 (function () {
-  try {
-    if (document.title.indexOf('Just a moment') !== -1 || document.querySelector('iframe[src*="cloudflare"]')) {
-      return;
-    }
+  var targetVer = "$escapedVer";
+  var preferredAbi = "$escapedAbi";
+  var count = 0;
 
-    var targetVer = "$escapedVer";
-    var preferredAbi = "$escapedAbi";
-
-    // Step 4: Final download page -> click #download-link
-    var finalDl = document.querySelector('a#download-link, a.downloadButton[href*="download.php"]');
-    if (finalDl && finalDl.href && !finalDl.getAttribute('data-autopilot-clicked')) {
-      finalDl.setAttribute('data-autopilot-clicked', 'true');
-      window.Android && window.Android.log && window.Android.log("Starting download...");
-      finalDl.click();
-      return;
-    }
-
-    // Step 3: Variant page -> click "Download APK" (.downloadButton)
-    var dlBtn = document.querySelector('a.downloadButton, a[href*="/download/?key="]');
-    if (dlBtn && dlBtn.href && !dlBtn.getAttribute('data-autopilot-clicked')) {
-      dlBtn.setAttribute('data-autopilot-clicked', 'true');
-      window.Android && window.Android.log && window.Android.log("Clicking Download APK...");
-      dlBtn.click();
-      return;
-    }
-
-    // Step 2: Release page with variants table
-    var variantRows = document.querySelectorAll('div.table-row.headerFont, div.table-row');
-    if (variantRows && variantRows.length > 0) {
-      var bestLink = null;
-      var bestScore = -1;
-      for (var i = 0; i < variantRows.length; i++) {
-        var row = variantRows[i];
-        var badge = row.querySelector('span.apkm-badge');
-        var badgeText = badge ? badge.textContent.trim().toUpperCase() : '';
-        if (badgeText.indexOf('BUNDLE') !== -1) continue;
-
-        var rowText = row.textContent.toLowerCase();
-        var score = 1;
-        if (preferredAbi && rowText.indexOf(preferredAbi.toLowerCase()) !== -1) {
-          score += 10;
-        }
-        if (rowText.indexOf('nodpi') !== -1) {
-          score += 2;
-        }
-        if (score > bestScore) {
-          var link = row.querySelector('div.table-cell a[href*="-apk/"], a.downloadLink, a[href*="-apk/"]');
-          if (!link) {
-            var allLinks = row.querySelectorAll('a[href]');
-            for (var j = 0; j < allLinks.length; j++) {
-              if (allLinks[j].href.indexOf('-apk/') !== -1 || allLinks[j].href.indexOf('-download/') !== -1) {
-                link = allLinks[j];
-                break;
-              }
-            }
-          }
-          if (link) {
-            bestScore = score;
-            bestLink = link;
-          }
-        }
+  function runStep() {
+    try {
+      if (document.title.indexOf('Just a moment') !== -1) {
+        return false;
       }
-      if (!bestLink) {
+
+      // Step 4: Final download page -> click #download-link
+      var finalDl = document.querySelector('a#download-link, a.downloadButton[href*="download.php"]');
+      if (finalDl && finalDl.href && !finalDl.getAttribute('data-autopilot-clicked')) {
+        finalDl.setAttribute('data-autopilot-clicked', 'true');
+        window.Android && window.Android.log && window.Android.log("Starting download...");
+        finalDl.click();
+        return true;
+      }
+
+      // Step 3: Variant page -> click "Download APK" (.downloadButton)
+      var dlBtn = document.querySelector('a.downloadButton, a[href*="/download/?key="]');
+      if (dlBtn && dlBtn.href && !dlBtn.getAttribute('data-autopilot-clicked')) {
+        dlBtn.setAttribute('data-autopilot-clicked', 'true');
+        window.Android && window.Android.log && window.Android.log("Clicking Download APK...");
+        dlBtn.click();
+        return true;
+      }
+
+      // Step 2: Release page with variants table
+      var variantRows = document.querySelectorAll('div.table-row.headerFont, div.table-row');
+      if (variantRows && variantRows.length > 0) {
+        var bestLink = null;
+        var bestScore = -1;
         for (var i = 0; i < variantRows.length; i++) {
           var row = variantRows[i];
-          var link = row.querySelector('div.table-cell a[href*="-apk/"], a.downloadLink, a[href*="-download/"]');
-          if (link) { bestLink = link; break; }
-        }
-      }
-      if (bestLink && !bestLink.getAttribute('data-autopilot-clicked')) {
-        bestLink.setAttribute('data-autopilot-clicked', 'true');
-        window.Android && window.Android.log && window.Android.log("Selected " + preferredAbi + " APK variant...");
-        bestLink.click();
-        return;
-      }
-    }
+          var badge = row.querySelector('span.apkm-badge');
+          var badgeText = badge ? badge.textContent.trim().toUpperCase() : '';
+          if (badgeText.indexOf('BUNDLE') !== -1) continue;
 
-    // Step 1: Search results page -> click matching release row
-    var releaseLinks = document.querySelectorAll('a[href*="-release/"]');
-    if (releaseLinks && releaseLinks.length > 0) {
-      var chosenLink = null;
-      for (var k = 0; k < releaseLinks.length; k++) {
-        var rLink = releaseLinks[k];
-        if (rLink.href.indexOf('#') !== -1) continue;
-        var linkText = (rLink.textContent || '') + ' ' + (rLink.href || '');
-        if (targetVer && (linkText.indexOf(targetVer) !== -1 || linkText.indexOf(targetVer.replace(/\./g, '-')) !== -1)) {
-          chosenLink = rLink;
-          break;
+          var rowText = row.textContent.toLowerCase();
+          var score = 1;
+          if (preferredAbi && rowText.indexOf(preferredAbi.toLowerCase()) !== -1) {
+            score += 10;
+          }
+          if (rowText.indexOf('nodpi') !== -1) {
+            score += 2;
+          }
+          if (score > bestScore) {
+            var link = row.querySelector('div.table-cell a[href*="-apk/"], a.downloadLink, a[href*="-apk/"]');
+            if (!link) {
+              var allLinks = row.querySelectorAll('a[href]');
+              for (var j = 0; j < allLinks.length; j++) {
+                if (allLinks[j].href.indexOf('-apk/') !== -1 || allLinks[j].href.indexOf('-download/') !== -1) {
+                  link = allLinks[j];
+                  break;
+                }
+              }
+            }
+            if (link) {
+              bestScore = score;
+              bestLink = link;
+            }
+          }
+        }
+        if (!bestLink) {
+          for (var i = 0; i < variantRows.length; i++) {
+            var row = variantRows[i];
+            var link = row.querySelector('div.table-cell a[href*="-apk/"], a.downloadLink, a[href*="-download/"]');
+            if (link) { bestLink = link; break; }
+          }
+        }
+        if (bestLink && !bestLink.getAttribute('data-autopilot-clicked')) {
+          bestLink.setAttribute('data-autopilot-clicked', 'true');
+          window.Android && window.Android.log && window.Android.log("Selected " + preferredAbi + " APK variant...");
+          bestLink.click();
+          return true;
         }
       }
-      if (!chosenLink && releaseLinks.length > 0) {
-        for (var m = 0; m < releaseLinks.length; m++) {
-          if (releaseLinks[m].href.indexOf('#') === -1) {
-            chosenLink = releaseLinks[m];
+
+      // Step 1: Search results page -> click matching release row
+      var releaseLinks = document.querySelectorAll('a[href*="-release/"]');
+      if (releaseLinks && releaseLinks.length > 0) {
+        var chosenLink = null;
+        for (var k = 0; k < releaseLinks.length; k++) {
+          var rLink = releaseLinks[k];
+          if (rLink.href.indexOf('#') !== -1) continue;
+          var linkText = (rLink.textContent || '') + ' ' + (rLink.href || '');
+          if (targetVer && (linkText.indexOf(targetVer) !== -1 || linkText.indexOf(targetVer.replace(/\./g, '-')) !== -1)) {
+            chosenLink = rLink;
             break;
           }
         }
+        if (!chosenLink && releaseLinks.length > 0) {
+          for (var m = 0; m < releaseLinks.length; m++) {
+            if (releaseLinks[m].href.indexOf('#') === -1) {
+              chosenLink = releaseLinks[m];
+              break;
+            }
+          }
+        }
+        if (chosenLink && !chosenLink.getAttribute('data-autopilot-clicked')) {
+          chosenLink.setAttribute('data-autopilot-clicked', 'true');
+          window.Android && window.Android.log && window.Android.log("Selecting release " + (targetVer || "") + "...");
+          chosenLink.click();
+          return true;
+        }
       }
-      if (chosenLink && !chosenLink.getAttribute('data-autopilot-clicked')) {
-        chosenLink.setAttribute('data-autopilot-clicked', 'true');
-        window.Android && window.Android.log && window.Android.log("Selecting release " + (targetVer || "") + "...");
-        chosenLink.click();
-        return;
-      }
+    } catch (e) {
+      window.Android && window.Android.log && window.Android.log("Auto-pilot error: " + e.message);
     }
-  } catch (e) {
-    window.Android && window.Android.log && window.Android.log("Auto-pilot error: " + e.message);
+    return false;
+  }
+
+  if (!runStep()) {
+    var timer = setInterval(function () {
+      count++;
+      if (runStep() || count > 35) {
+        clearInterval(timer);
+      }
+    }, 800);
   }
 })();
     """.trimIndent()

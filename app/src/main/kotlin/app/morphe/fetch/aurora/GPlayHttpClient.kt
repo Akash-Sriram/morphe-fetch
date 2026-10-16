@@ -22,7 +22,7 @@ internal class GPlayHttpClient(
     private companion object {
         const val POST = "POST"
         const val GET = "GET"
-        const val USER_AGENT = "com.aurora.store-4.6.0-70"
+        const val USER_AGENT = "com.aurora.store-4.8.4-76"
     }
 
     private val _responseCode = MutableStateFlow(100)

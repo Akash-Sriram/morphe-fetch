@@ -140,8 +140,6 @@ dependencies {
     implementation("com.google.code.gson:gson:2.13.2")
     implementation("com.google.re2j:re2j:1.8")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
-    implementation("com.squareup.retrofit2:converter-gson:3.0.0")
-    implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("org.jsoup:jsoup:1.22.1")
     implementation("com.auroraoss:gplayapi:3.6.4")
     implementation("com.google.protobuf:protobuf-javalite:4.35.1")

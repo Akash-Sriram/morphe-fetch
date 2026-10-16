@@ -8,6 +8,7 @@ import android.app.Activity
 import android.content.Context
 import app.morphe.fetch.loadHelperSettings
 import app.morphe.fetch.saveHelperSettings
+import app.morphe.fetch.updateAuroraToken
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -15,9 +16,12 @@ import android.util.Base64
 import android.util.Log
 import com.aurora.gplayapi.data.models.Artwork
 import com.aurora.gplayapi.data.models.AuthData
+import com.aurora.gplayapi.data.models.PlayResponse
 import com.aurora.gplayapi.data.models.UserProfile
 import com.aurora.gplayapi.data.providers.DeviceInfoProvider
+import com.aurora.gplayapi.helpers.AppDetailsHelper
 import com.aurora.gplayapi.helpers.AuthHelper
+import com.aurora.gplayapi.network.IHttpClient
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
@@ -47,12 +51,40 @@ internal class MicroGAccountTokenProvider(
             "https://auroraoss.in/api/auth"
         )
 
+        const val VALIDATION_PACKAGE = "com.google.android.apps.maps"
+
         const val GOOGLE_PLAY_CERT =
-            "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"
+            "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"
     }
 
     @Volatile
     private var cachedAuthData: AuthData? = null
+
+    /** Uncached client wrapping GPlayHttpClient with no-cache header (matches Aurora nightly) */
+    private val uncachedHttpClient = object : IHttpClient by httpClient {
+        override fun get(
+            url: String,
+            headers: Map<String, String>,
+            params: Map<String, String>
+        ): PlayResponse = httpClient.get(url, headers + ("Cache-Control" to "no-cache"), params)
+    }
+
+    /**
+     * Session validation matching Aurora nightly:
+     * - Uses no-cache header to prevent stale cached responses from vouching for expired sessions.
+     * - Probes actual Play Store API connectivity via AppDetailsHelper for VALIDATION_PACKAGE.
+     * - Retains valid credentials on IOException (network unreachable / timeouts) rather than invalidating good sessions.
+     */
+    fun isSavedAuthDataValid(authData: AuthData): Boolean = try {
+        val app = AppDetailsHelper(authData).using(uncachedHttpClient)
+            .getAppByPackageName(VALIDATION_PACKAGE)
+        app.packageName == VALIDATION_PACKAGE && app.displayName.isNotEmpty()
+    } catch (exception: IOException) {
+        Log.w(TAG, "Network unreachable while checking session validity, preserving cached session: ${exception.message}")
+        true
+    } catch (_: Exception) {
+        false
+    }
 
     /** Clears the cached auth session so the next call to [getAuthData] fetches a fresh one. */
     fun invalidateAuth() {
@@ -79,6 +111,8 @@ internal class MicroGAccountTokenProvider(
                 runCatching { accountManager.invalidateAuthToken(type, targetToken) }
             }
         }
+        // Wipe expired token from SharedPreferences so we do not read it again
+        context.updateAuroraToken(token = null, email = targetEmail)
     }
 
     fun getSupportedAccountTypes(): Array<String> = SUPPORTED_ACCOUNT_TYPES
@@ -91,8 +125,36 @@ internal class MicroGAccountTokenProvider(
         }
     }
 
+    /**
+     * Re-authenticates the configured account by requesting a fresh OAuth2 token
+     * from MicroG, updating SharedPreferences, and rebuilding AuthData.
+     */
+    suspend fun refreshAccountToken(activity: Activity? = null): AuthData = withContext(Dispatchers.IO) {
+        cachedAuthData = null
+        val settings = context.loadHelperSettings()
+        val email = settings.auroraEmail?.trim()?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("No account configured to refresh.")
+
+        Log.i(TAG, "Refreshing Google Play token via MicroG for account $email...")
+        val freshToken = fetchTokenForEmail(email, activity, settings.auroraTokenType)
+        context.updateAuroraToken(token = freshToken, email = email, tokenType = "AUTH")
+
+        val deviceProps = NativeDeviceProfileProvider.getDeviceProperties(context)
+        val locale = Locale.getDefault()
+        val authData = AuthHelper.using(httpClient).build(
+            email = email,
+            token = freshToken,
+            tokenType = AuthHelper.Token.AUTH,
+            properties = deviceProps,
+            locale = locale
+        )
+        cachedAuthData = authData
+        Log.i(TAG, "Successfully refreshed Google Play session for $email")
+        authData
+    }
+
     suspend fun getAuthData(activity: Activity? = null): AuthData = withContext(Dispatchers.IO) {
-        cachedAuthData?.takeIf { AuthHelper.using(httpClient).isValid(it) }?.let {
+        cachedAuthData?.takeIf { isSavedAuthDataValid(it) }?.let {
             return@withContext it
         }
 
@@ -102,32 +164,53 @@ internal class MicroGAccountTokenProvider(
         val deviceProps = NativeDeviceProfileProvider.getDeviceProperties(context)
         val locale = Locale.getDefault()
 
-        // 1. If user entered / saved a token in Settings, use it directly
-        if (!configuredToken.isNullOrBlank()) {
-            val tokenType = if (settings.auroraTokenType.equals("AAS", ignoreCase = true)) {
-                AuthHelper.Token.AAS
-            } else {
-                AuthHelper.Token.AUTH
+        // 1. If an account is logged in / configured, prioritize it
+        if (configuredEmail != null) {
+            if (!configuredToken.isNullOrBlank()) {
+                val tokenType = if (settings.auroraTokenType.equals("AAS", ignoreCase = true)) {
+                    AuthHelper.Token.AAS
+                } else {
+                    AuthHelper.Token.AUTH
+                }
+                try {
+                    val authData = AuthHelper.using(httpClient).build(
+                        email = configuredEmail,
+                        token = configuredToken,
+                        tokenType = tokenType,
+                        properties = deviceProps,
+                        locale = locale
+                    )
+                    if (isSavedAuthDataValid(authData)) {
+                        cachedAuthData = authData
+                        Log.i(TAG, "Successfully built and validated Google Play session from configured settings ($configuredEmail)")
+                        return@withContext authData
+                    } else {
+                        Log.w(TAG, "Cached token for $configuredEmail failed validation, auto-refreshing via MicroG...")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Cached token for $configuredEmail is invalid, auto-refreshing via MicroG...", e)
+                }
             }
-            val email = configuredEmail ?: "user@gmail.com"
+
+            // Token is absent or expired -> auto-refresh from MicroG
             try {
-                val authData = AuthHelper.using(httpClient).build(
-                    email = email,
-                    token = configuredToken,
-                    tokenType = tokenType,
-                    properties = deviceProps,
-                    locale = locale
-                )
-                cachedAuthData = authData
-                Log.i(TAG, "Successfully built Google Play session from configured settings ($email)")
-                return@withContext authData
+                return@withContext refreshAccountToken(activity)
             } catch (e: Exception) {
-                Log.w(TAG, "Configured Google Play token is invalid: ${e.message}", e)
+                Log.e(TAG, "Failed to auto-refresh token for $configuredEmail: ${e.message}", e)
+                throw IllegalStateException(
+                    "Google Play session for $configuredEmail has expired. Please re-authenticate in Settings.",
+                    e
+                )
             }
         }
 
-        // 2. Automatically fetch session using Aurora dispenser infrastructure with endpoint failover
-        for (dispenser in DEFAULT_DISPENSERS) {
+        // 2. Anonymous mode: fetch session using custom or default dispenser endpoints
+        val dispensersToTry = buildList {
+            settings.auroraCustomDispenser?.trim()?.takeIf { it.isNotBlank() }?.let(::add)
+            addAll(DEFAULT_DISPENSERS)
+        }.distinct()
+
+        for (dispenser in dispensersToTry) {
             for (attempt in 1..2) {
                 try {
                     val authData = fetchAnonymousAuthData(dispenser, deviceProps, locale)
@@ -143,11 +226,10 @@ internal class MicroGAccountTokenProvider(
             }
         }
 
-        // 3. Fallback to on-device Google account
+        // 3. Fallback to on-device MicroG accounts if available
         val accounts = getAvailableAccounts()
         if (accounts.isNotEmpty()) {
-            val account = accounts.firstOrNull { it.name.equals(configuredEmail, ignoreCase = true) }
-                ?: accounts.first()
+            val account = accounts.first()
             try {
                 val token = fetchAccountToken(account, activity)
                 val authData = AuthHelper.using(httpClient).build(
@@ -157,6 +239,7 @@ internal class MicroGAccountTokenProvider(
                     properties = deviceProps,
                     locale = locale
                 )
+                context.updateAuroraToken(token = token, email = account.name, tokenType = "AUTH")
                 cachedAuthData = authData
                 Log.i(TAG, "Successfully authenticated with device account: ${account.name}")
                 return@withContext authData

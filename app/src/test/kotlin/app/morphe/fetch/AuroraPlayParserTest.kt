@@ -57,5 +57,34 @@ class AuroraPlayParserTest {
         assertFalse(AuroraPlayParser.versionsShareMajorMinor("7.94.0.984908898", "7.93.0.123456"))
         assertFalse(AuroraPlayParser.versionsShareMajorMinor("7.94.0.984908898", "8.94.0"))
     }
+
+    @Test
+    fun looksLikeApkDownload_recognizesApkMirrorAndStandardUrls() {
+        // APKMirror dynamic download PHP key URLs
+        assertTrue("https://www.apkmirror.com/wp-content/themes/responsive/download.php?key=123456789".looksLikeApkDownload())
+        assertTrue("https://www.apkmirror.com/apk/google-inc/youtube/download/?key=abcdef123".looksLikeApkDownload())
+        assertTrue("https://www.apkmirror.com/download.php".looksLikeApkDownload())
+
+        // Standard extension and CDN URLs
+        assertTrue("https://example.com/app.apk".looksLikeApkDownload())
+        assertTrue("https://example.com/app.apks".looksLikeApkDownload())
+        assertTrue("https://example.com/app.apkm".looksLikeApkDownload())
+        assertTrue("https://example.com/app.xapk".looksLikeApkDownload())
+        assertTrue("https://dw.uptodown.com/dwn/abc123xyz".looksLikeApkDownload())
+
+        // Uptodown store installer stub should be rejected
+        assertFalse("https://dw.uptodown.com/dwn/uptodown-com.reddit.frontpage.apk".looksLikeApkDownload())
+        assertFalse("https://www.apkmirror.com/apk/google-inc/youtube/".looksLikeApkDownload())
+    }
+
+    @Test
+    fun helperSettings_persistsCustomDispenser() {
+        val settings = HelperSettings(
+            auroraEmail = "test@example.com",
+            auroraAuthToken = "token123",
+            auroraCustomDispenser = "https://custom-dispenser.example.com/api/auth"
+        )
+        assertEquals("https://custom-dispenser.example.com/api/auth", settings.auroraCustomDispenser)
+    }
 }
 

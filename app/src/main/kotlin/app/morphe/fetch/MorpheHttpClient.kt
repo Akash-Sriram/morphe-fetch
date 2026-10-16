@@ -36,7 +36,7 @@ internal object WebKitCookieJar : CookieJar {
         val rawHeaders = buildList {
             cookieManager.getCookie(url.toString())?.takeIf { it.isNotBlank() }?.let(::add)
             val host = url.host.lowercase(Locale.US)
-            val baseDomains = listOf("apkmirror.com", "uptodown.com", "apkcombo.com", "apkpure.com")
+            val baseDomains = listOf("apkmirror.com", "uptodown.com", "apkpure.com")
             for (domain in baseDomains) {
                 if (host.endsWith(domain)) {
                     cookieManager.getCookie("https://www.$domain/")?.takeIf { it.isNotBlank() }?.let(::add)
@@ -213,7 +213,6 @@ internal object MorpheHttpClient {
 
                 chain.proceed(reqBuilder.build())
             }
-            .addInterceptor(httpLoggingInterceptor("Default"))
             .build()
     }
 
@@ -292,7 +291,6 @@ internal object MorpheHttpClient {
                 }
                 response
             }
-            .addInterceptor(httpLoggingInterceptor("APKMirror"))
             .build()
     }
 
@@ -314,7 +312,6 @@ internal object MorpheHttpClient {
                         .build()
                 )
             }
-            .addInterceptor(httpLoggingInterceptor("APKPure"))
             .build()
     }
 
@@ -323,7 +320,6 @@ internal object MorpheHttpClient {
             .connectionPool(connectionPool)
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
-            .addInterceptor(httpLoggingInterceptor("Download"))
             .build()
     }
 
@@ -342,7 +338,6 @@ internal object MorpheHttpClient {
             .readTimeout(30, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
-            .addInterceptor(httpLoggingInterceptor("Aurora"))
             .build()
     }
 }

@@ -8,8 +8,13 @@ import com.google.gson.annotations.SerializedName
 import java.io.File
 import java.util.Locale
 
+internal enum class LogLevel {
+    Info,
+    Warning,
+    Error
+}
+
 internal val DOWNLOAD_FILE_KIND_ORDER = listOf("apk", "apkm", "apks", "xapk")
-internal val APK_COMBO_FILE_KIND_ORDER = listOf("apk", "xapk", "apks")
 internal val DOWNLOAD_FILE_KIND_SET = DOWNLOAD_FILE_KIND_ORDER.toSet()
 internal val SPLIT_ARCHIVE_FILE_KINDS = setOf("apkm", "apks", "xapk")
 internal val DOWNLOAD_FILE_KIND_REGEX = Regex("""apkm|apks|xapk|apk""", RegexOption.IGNORE_CASE)
@@ -175,7 +180,6 @@ internal data class HelperRequest(
         val domain = when (source) {
             DownloadSource.AURORA -> "play.google.com"
             DownloadSource.APK_PURE -> "apkpure.com"
-            DownloadSource.APK_COMBO -> "apkcombo.com"
             DownloadSource.UPTODOWN -> "uptodown.com"
             DownloadSource.APK_MIRROR -> "apkmirror.com"
         }
@@ -250,15 +254,13 @@ internal enum class DownloadSource(
 ) {
     AURORA("Aurora", 0),
     APK_PURE("APKPure", 1),
-    APK_COMBO("APKCombo", 2),
-    UPTODOWN("Uptodown", 3),
-    APK_MIRROR("APKMirror", 4)
+    UPTODOWN("Uptodown", 2),
+    APK_MIRROR("APKMirror", 3)
 }
 
 internal fun DownloadSource.searchDomain(): String? = when (this) {
     DownloadSource.AURORA -> "play.google.com"
     DownloadSource.APK_PURE -> "apkpure.com"
-    DownloadSource.APK_COMBO -> "apkcombo.com"
     DownloadSource.UPTODOWN -> "uptodown.com"
     DownloadSource.APK_MIRROR -> null // uses apkMirrorBrowserSearchUrl instead of Google search
 }

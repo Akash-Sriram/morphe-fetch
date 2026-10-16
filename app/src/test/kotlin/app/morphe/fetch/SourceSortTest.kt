@@ -39,7 +39,7 @@ class SourceSortTest {
         val request = testRequest(packageName = "in.startv.hotstar")
         val groups = listOf(
             createGroup(DownloadSource.APK_PURE, latestState = ResolveState.Error("No listing found on APKPure")),
-            createGroup(DownloadSource.APK_COMBO, latestState = ResolveState.Error("No listing found on APKCombo")),
+            createGroup(DownloadSource.AURORA, latestState = ResolveState.Error("No listing found on Aurora")),
             createGroup(DownloadSource.UPTODOWN, latestState = ResolveState.Error("No listing found on Uptodown")),
             createGroup(
                 DownloadSource.APK_MIRROR,
@@ -52,8 +52,8 @@ class SourceSortTest {
         assertEquals(
             listOf(
                 DownloadSource.APK_MIRROR,
+                DownloadSource.AURORA,
                 DownloadSource.APK_PURE,
-                DownloadSource.APK_COMBO,
                 DownloadSource.UPTODOWN
             ),
             sorted.map { it.source }
@@ -64,8 +64,8 @@ class SourceSortTest {
     fun sortedForDisplay_preservesDefaultOrderWhenAllHaveDirectDownloads() {
         val request = testRequest(packageName = "com.example.app")
         val groups = listOf(
+            createGroup(DownloadSource.AURORA, latestState = ResolveState.Done(listOf(dummyCandidate(DownloadSource.AURORA)))),
             createGroup(DownloadSource.APK_PURE, latestState = ResolveState.Done(listOf(dummyCandidate(DownloadSource.APK_PURE)))),
-            createGroup(DownloadSource.APK_COMBO, latestState = ResolveState.Done(listOf(dummyCandidate(DownloadSource.APK_COMBO)))),
             createGroup(DownloadSource.UPTODOWN, latestState = ResolveState.Done(listOf(dummyCandidate(DownloadSource.UPTODOWN)))),
             createGroup(DownloadSource.APK_MIRROR, latestState = ResolveState.Done(listOf(dummyCandidate(DownloadSource.APK_MIRROR))))
         )
@@ -74,8 +74,8 @@ class SourceSortTest {
 
         assertEquals(
             listOf(
+                DownloadSource.AURORA,
                 DownloadSource.APK_PURE,
-                DownloadSource.APK_COMBO,
                 DownloadSource.UPTODOWN,
                 DownloadSource.APK_MIRROR
             ),
@@ -88,7 +88,7 @@ class SourceSortTest {
         val request = testRequest(packageName = "com.example.app")
         val groups = listOf(
             createGroup(DownloadSource.APK_PURE, latestState = ResolveState.Error("No listing found")),
-            createGroup(DownloadSource.APK_COMBO, latestState = ResolveState.Loading),
+            createGroup(DownloadSource.AURORA, latestState = ResolveState.Loading),
             createGroup(DownloadSource.UPTODOWN, latestState = ResolveState.Error("No listing found")),
             createGroup(DownloadSource.APK_MIRROR, latestState = ResolveState.Done(listOf(dummyCandidate(DownloadSource.APK_MIRROR))))
         )
@@ -98,7 +98,7 @@ class SourceSortTest {
         assertEquals(
             listOf(
                 DownloadSource.APK_MIRROR,
-                DownloadSource.APK_COMBO,
+                DownloadSource.AURORA,
                 DownloadSource.APK_PURE,
                 DownloadSource.UPTODOWN
             ),
@@ -119,7 +119,7 @@ class SourceSortTest {
                 latestState = ResolveState.Done(listOf(dummyCandidate(DownloadSource.APK_PURE, directDownload = true)))
             ),
             createGroup(
-                DownloadSource.APK_COMBO,
+                DownloadSource.AURORA,
                 recommendedState = ResolveState.Error("No listing found"),
                 latestState = ResolveState.Error("No listing found")
             ),
@@ -135,7 +135,7 @@ class SourceSortTest {
             listOf(
                 DownloadSource.APK_MIRROR,
                 DownloadSource.APK_PURE,
-                DownloadSource.APK_COMBO
+                DownloadSource.AURORA
             ),
             sorted.map { it.source }
         )

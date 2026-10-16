@@ -31,8 +31,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Cache
 import okhttp3.OkHttpClient
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 import java.io.File
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
@@ -58,14 +56,8 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     private val gplayClient get() = MorpheHttpClient.gplayClient
 
     private val apkPureApi by lazy {
-        Retrofit.Builder()
-            .client(apkPureClient)
-            .baseUrl("https://tapi.pureapk.com/")
-            .addConverterFactory(GsonConverterFactory.create(gson))
-            .build()
-            .create(ApkPureApi::class.java)
+        OkHttpApkPureApi(apkPureClient, gson)
     }
-
 
     private val parsers: Map<DownloadSource, ApkSourceParser> by lazy {
         val parserContext = SourceParserContext(
@@ -86,8 +78,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             AuroraPlayParser(application, gplayClient, apkPureApi = apkPureApi),
             ApkMirrorParser(apkMirrorParserContext),
             UptodownParser(parserContext),
-            ApkPureParser(parserContext),
-            ApkComboParser(parserContext)
+            ApkPureParser(parserContext)
         ).associateBy { it.source }
     }
 
@@ -241,8 +232,6 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         while (_finishEvents.tryReceive().isSuccess) {
             // Drain buffered finish events
         }
-        AppLog.clear()
-        AppLog.setRequestSummary(null)
     }
 
     fun updateSelectedPagerPage(page: Int) {
@@ -365,16 +354,14 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                     DownloadSource.APK_MIRROR,
                     DownloadSource.APK_PURE,
                     DownloadSource.AURORA,
-                    DownloadSource.UPTODOWN,
-                    DownloadSource.APK_COMBO
+                    DownloadSource.UPTODOWN
                 )
             } else {
                 listOf(
                     DownloadSource.AURORA,
                     DownloadSource.APK_PURE,
                     DownloadSource.APK_MIRROR,
-                    DownloadSource.UPTODOWN,
-                    DownloadSource.APK_COMBO
+                    DownloadSource.UPTODOWN
                 )
             }
             val sourcesToTry = (listOfNotNull(preferred) + defaultOrder)
@@ -415,11 +402,12 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                     }
 
                 if (directMatch == null && src == DownloadSource.UPTODOWN) {
-                    val indirectMatch = outcome.candidates
+                    val indirectCandidates = (outcome.candidates + listOfNotNull(outcome.fallbackCandidate))
+                    val indirectMatch = indirectCandidates
                         .filter { candidate ->
                             !candidate.directDownload &&
                                 candidate.formatMatches &&
-                                currentReq.isRequestedMatch(candidate)
+                                (currentReq.isRequestedMatch(candidate) || candidate.captchaUrl != null)
                         }
                         .minByOrNull { candidate ->
                             val arch = candidate.variantLabel?.lowercase(Locale.US) ?: ""
@@ -540,27 +528,8 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
 
     private fun startRequestLog(request: HelperRequest?) {
         if (request == null) {
-            if (AppLog.entries.isEmpty()) {
-                AppLog.setRequestSummary(null)
-                appendLog("Opened without a Morphe request.", LogLevel.Warning)
-            }
+            appendLog("Opened without a Morphe request.", LogLevel.Warning)
         } else {
-            AppLog.clear()
-            AppLog.setRequestSummary(
-                buildString {
-                    append("App: ${request.appName}\n")
-                    append("Package: ${request.packageName}\n")
-                    append("Version: ${request.requestedVersionName ?: "any compatible"}\n")
-                    append("Build: ${request.versionCodeSummary ?: "any"}\n")
-                    append("Format: ${request.requestedFormatLabel.ifBlank { "any" }}\n")
-                    if (request.availableAbis.isNotEmpty()) {
-                        append("ABI: ${request.abiSummary}\n")
-                    }
-                    request.sourceHintUrls.takeIf { it.isNotEmpty() }?.let { urls ->
-                        append("Source hints: ${urls.joinToString()}\n")
-                    }
-                }.trimEnd()
-            )
             appendLog(
                 "Request for ${request.appName} (${request.packageName}), " +
                     "version ${request.versionName ?: "any compatible"}, " +
@@ -594,7 +563,11 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun appendLog(message: String, level: LogLevel = LogLevel.Info) {
-        AppLog.record(level, message)
+        when (level) {
+            LogLevel.Info -> Log.i(TAG, message)
+            LogLevel.Warning -> Log.w(TAG, message)
+            LogLevel.Error -> Log.e(TAG, message)
+        }
     }
 
     fun changeRequestedFileType(kind: String) {

@@ -1,13 +1,15 @@
 package app.morphe.fetch
 
 import android.os.Build
+import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
-import retrofit2.http.Body
-import retrofit2.http.GET
-import retrofit2.http.Header
-import retrofit2.http.Headers
-import retrofit2.http.POST
-import retrofit2.http.Query
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import kotlin.random.Random
 
 internal data class ApkMirrorLatestInfo(
@@ -60,15 +62,34 @@ internal data class UptodownVariantFile(
 )
 
 internal interface ApkPureApi {
-    @Headers(
-        "content-type: application/json",
-        "ual-access-businessid: projecta"
-    )
-    @POST("v3/get_app_update")
     suspend fun getAppUpdate(
-        @Header("ual-access-projecta") header: String,
-        @Body request: ApkPureUpdateRequest
+        header: String,
+        request: ApkPureUpdateRequest
     ): ApkPureUpdateResponse
+}
+
+internal class OkHttpApkPureApi(
+    private val client: OkHttpClient,
+    private val gson: Gson
+) : ApkPureApi {
+    override suspend fun getAppUpdate(
+        header: String,
+        request: ApkPureUpdateRequest
+    ): ApkPureUpdateResponse = withContext(Dispatchers.IO) {
+        val requestBody = gson.toJson(request).toRequestBody("application/json".toMediaType())
+        val req = Request.Builder()
+            .url("https://tapi.pureapk.com/v3/get_app_update")
+            .header("content-type", "application/json")
+            .header("ual-access-businessid", "projecta")
+            .header("ual-access-projecta", header)
+            .post(requestBody)
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("APKPure API error: HTTP ${resp.code}")
+            val json = resp.body?.string().orEmpty()
+            gson.fromJson(json, ApkPureUpdateResponse::class.java)
+        }
+    }
 }
 
 internal data class ApkPureUpdateRequest(
