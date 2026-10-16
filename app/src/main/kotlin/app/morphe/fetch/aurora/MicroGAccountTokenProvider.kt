@@ -314,104 +314,105 @@ internal class MicroGAccountTokenProvider(
         return withTimeout(timeoutMs) {
             suspendCancellableCoroutine { continuation ->
                 val accountManager = AccountManager.get(context)
-                val options = Bundle().apply {
-                    putString("overridePackage", PACKAGE_NAME_PLAY_STORE)
-                    putByteArray("overrideCertificate", Base64.decode(GOOGLE_PLAY_CERT, Base64.DEFAULT))
-                }
                 val handler = Handler(Looper.getMainLooper())
 
-                val callback = object : AccountManagerCallback<Bundle> {
-                    var retried = false
-
-                    override fun run(future: AccountManagerFuture<Bundle>) {
-                        try {
-                            val result = future.result
-                            val token = result.getString(AccountManager.KEY_AUTHTOKEN)
-                            if (!token.isNullOrBlank()) {
-                                if (continuation.isActive) continuation.resume(token)
-                                return
-                            }
-
-                            val intent = if (android.os.Build.VERSION.SDK_INT >= 33) {
-                                result.getParcelable(AccountManager.KEY_INTENT, android.content.Intent::class.java)
-                            } else {
-                                @Suppress("DEPRECATION")
-                                result.getParcelable(AccountManager.KEY_INTENT) as? android.content.Intent
-                            }
-
-                            if (intent != null) {
-                                if (activity != null) {
-                                    Log.i(TAG, "Launching MicroG consent intent for ${account.name}...")
-                                    runCatching { activity.startActivity(intent) }
-                                    if (continuation.isActive) {
-                                        continuation.resumeWithException(
-                                            IllegalStateException("Please grant MicroG permission in the opened prompt, then tap login again.")
-                                        )
-                                    }
-                                    return
-                                } else {
-                                    if (continuation.isActive) {
-                                        continuation.resumeWithException(
-                                            IllegalStateException("MicroG consent required for ${account.name}. Please select this account in Morphe Fetch Settings to authorize.")
-                                        )
-                                    }
-                                    return
-                                }
-                            }
-
-                            // MicroG-RE AskPackageOverrideActivity returns "retry" upon user granting consent
-                            val isRetry = result.getBoolean("retry", false) || result.containsKey("retry")
-                            if (!retried && (isRetry || activity != null)) {
-                                retried = true
-                                Log.i(TAG, "MicroG consent/retry received for ${account.name} (${account.type}), requesting token again...")
-                                accountManager.getAuthToken(
-                                    account,
-                                    GOOGLE_PLAY_AUTH_TOKEN_TYPE,
-                                    options,
-                                    activity,
-                                    this,
-                                    handler
-                                )
-                                return
-                            }
-
-                            if (continuation.isActive) {
-                                continuation.resumeWithException(
-                                    IllegalStateException("AccountManager returned null auth token for ${account.name}")
-                                )
-                            }
-                        } catch (e: Exception) {
-                            if (continuation.isActive) {
-                                val msg = if (e.message?.contains("UnregisteredOnApiConsole", ignoreCase = true) == true) {
-                                    "Google Play Services does not permit direct login for third-party apps. Please stay with Anonymous session or use MicroG-RE."
-                                } else {
-                                    e.message ?: "Authentication failed"
-                                }
-                                continuation.resumeWithException(IllegalStateException(msg, e))
-                            }
+                fun tryGetToken(useOverrideOptions: Boolean) {
+                    val options = Bundle().apply {
+                        if (useOverrideOptions) {
+                            putString("overridePackage", PACKAGE_NAME_PLAY_STORE)
+                            putByteArray("overrideCertificate", Base64.decode(GOOGLE_PLAY_CERT, Base64.DEFAULT))
                         }
                     }
+
+                    // Use notifyAuthFailure = false so Android's internal AmsTask does NOT attempt to
+                    // auto-launch unexported activities (which throws SecurityException for MicroG-RE).
+                    accountManager.getAuthToken(
+                        account,
+                        GOOGLE_PLAY_AUTH_TOKEN_TYPE,
+                        options,
+                        false,
+                        { future ->
+                            try {
+                                val result = future.result
+                                val token = result.getString(AccountManager.KEY_AUTHTOKEN)
+                                if (!token.isNullOrBlank()) {
+                                    Log.i(TAG, "Successfully acquired Google Play token for ${account.name}")
+                                    if (continuation.isActive) continuation.resume(token)
+                                    return@getAuthToken
+                                }
+
+                                // If spoof-based token fetch didn't return a token, retry once with override options if not tried yet
+                                if (!useOverrideOptions) {
+                                    Log.d(TAG, "No token returned with spoof metadata, retrying with explicit override options...")
+                                    tryGetToken(true)
+                                    return@getAuthToken
+                                }
+
+                                val intent = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                                    result.getParcelable(AccountManager.KEY_INTENT, android.content.Intent::class.java)
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    result.getParcelable(AccountManager.KEY_INTENT) as? android.content.Intent
+                                }
+
+                                if (intent != null) {
+                                    val isExported = intent.component?.let { comp ->
+                                        runCatching { context.packageManager.getActivityInfo(comp, 0).exported }.getOrDefault(false)
+                                    } ?: true
+
+                                    if (isExported && activity != null) {
+                                        Log.i(TAG, "Launching exported consent activity for ${account.name}...")
+                                        activity.startActivity(intent)
+                                        if (continuation.isActive) {
+                                            continuation.resumeWithException(
+                                                IllegalStateException("Please grant permission in the opened prompt, then tap login again.")
+                                            )
+                                        }
+                                        return@getAuthToken
+                                    } else if (!isExported) {
+                                        // Attempt root launch if root is available
+                                        val launchedViaRoot = intent.component?.let { comp ->
+                                            runCatching {
+                                                val cmd = "am start -n ${comp.flattenToString()}"
+                                                val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                                                proc.waitFor() == 0
+                                            }.getOrDefault(false)
+                                        } ?: false
+
+                                        if (launchedViaRoot) {
+                                            Log.i(TAG, "Launched unexported consent activity via root for ${account.name}")
+                                            if (continuation.isActive) {
+                                                continuation.resumeWithException(
+                                                    IllegalStateException("Please grant MicroG permission in the opened prompt, then tap login again.")
+                                                )
+                                            }
+                                            return@getAuthToken
+                                        }
+                                    }
+                                }
+
+                                if (continuation.isActive) {
+                                    continuation.resumeWithException(
+                                        IllegalStateException("AccountManager returned null auth token for ${account.name}")
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                if (continuation.isActive) {
+                                    val msg = if (e.message?.contains("UnregisteredOnApiConsole", ignoreCase = true) == true) {
+                                        "Google Play Services does not permit direct login for third-party apps. Please stay with Anonymous session or use MicroG-RE."
+                                    } else {
+                                        e.message ?: "Authentication failed"
+                                    }
+                                    continuation.resumeWithException(IllegalStateException(msg, e))
+                                }
+                            }
+                        },
+                        handler
+                    )
                 }
 
-                if (activity != null) {
-                    accountManager.getAuthToken(
-                        account,
-                        GOOGLE_PLAY_AUTH_TOKEN_TYPE,
-                        options,
-                        activity,
-                        callback,
-                        handler
-                    )
-                } else {
-                    accountManager.getAuthToken(
-                        account,
-                        GOOGLE_PLAY_AUTH_TOKEN_TYPE,
-                        options,
-                        true,
-                        callback,
-                        handler
-                    )
-                }
+                // Start with spoof metadata (no override options) so MicroG-RE uses PackageSpoofUtils
+                tryGetToken(false)
             }
         }
     }

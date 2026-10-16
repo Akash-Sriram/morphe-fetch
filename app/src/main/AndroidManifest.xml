@@ -48,6 +48,21 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- MicroG-RE package and signature spoof metadata so MicroG mints Play Store tokens -->
+        <meta-data
+            android:name="app.revanced.android.gms.SPOOFED_PACKAGE_NAME"
+            android:value="com.android.vending" />
+        <meta-data
+            android:name="app.revanced.android.gms.SPOOFED_PACKAGE_SIGNATURE"
+            android:value="38918a453d07199354f8b19af05ec6562ced5788" />
+        <!-- Upstream microG package and signature spoof metadata -->
+        <meta-data
+            android:name="com.google.android.gms.SPOOFED_PACKAGE_NAME"
+            android:value="com.android.vending" />
+        <meta-data
+            android:name="com.google.android.gms.SPOOFED_PACKAGE_SIGNATURE"
+            android:value="38918a453d07199354f8b19af05ec6562ced5788" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
