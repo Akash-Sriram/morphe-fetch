@@ -47,8 +47,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DarkMode
@@ -64,7 +62,6 @@ import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material.icons.outlined.SdStorage
 import androidx.compose.material.icons.outlined.Share
-import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Star
@@ -76,7 +73,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Download
@@ -375,12 +371,8 @@ internal fun DownloadSourcesContent(
 
                         // Line 3 (Aurora only): email as static text + standalone settings IconButton
                         if (source == DownloadSource.AURORA && isEnabled) {
-                            val hasAccount = !settings.auroraAuthToken.isNullOrBlank()
-                            val accountText = when {
-                                !settings.auroraEmail.isNullOrBlank() -> settings.auroraEmail!!
-                                hasAccount -> "Custom token"
-                                else -> "Anonymous session"
-                            }
+                            val hasAccount = !settings.auroraEmail.isNullOrBlank() && !settings.auroraAuthToken.isNullOrBlank()
+                            val accountText = if (hasAccount) settings.auroraEmail else "Anonymous session"
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -453,11 +445,6 @@ private fun AuroraAccountDialog(
     val componentActivity = hostActivity as? ComponentActivity
     val lifecycleScope = componentActivity?.lifecycleScope ?: rememberCoroutineScope()
 
-    var showManualDialog by remember { mutableStateOf(false) }
-    var inputEmail by rememberSaveable { mutableStateOf(settings.auroraEmail.orEmpty()) }
-    var inputToken by rememberSaveable { mutableStateOf(settings.auroraAuthToken.orEmpty()) }
-    var inputType by rememberSaveable { mutableStateOf(settings.auroraTokenType) }
-    var inputCustomDispenser by rememberSaveable { mutableStateOf(settings.auroraCustomDispenser.orEmpty()) }
     var isAuthenticating by remember { mutableStateOf(false) }
 
     val tokenProvider = remember {
@@ -503,7 +490,7 @@ private fun AuroraAccountDialog(
         }
     }
 
-    val isConfigured = !settings.auroraAuthToken.isNullOrBlank()
+    val isConfigured = !settings.auroraEmail.isNullOrBlank() && !settings.auroraAuthToken.isNullOrBlank()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -559,13 +546,13 @@ private fun AuroraAccountDialog(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                text = "Account: ${settings.auroraEmail ?: "Custom"}",
+                                text = "Account: ${settings.auroraEmail.orEmpty()}",
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Token: ${settings.auroraAuthToken.take(12)}... (${settings.auroraTokenType})",
+                                text = "Connected via MicroG-RE",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -598,16 +585,6 @@ private fun AuroraAccountDialog(
                                         isAuthenticating = false
                                     }
                                 }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        HelperOutlinedButton(
-                            text = "Edit Token",
-                            onClick = {
-                                inputEmail = settings.auroraEmail.orEmpty()
-                                inputToken = settings.auroraAuthToken.orEmpty()
-                                inputType = settings.auroraTokenType
-                                showManualDialog = true
                             },
                             modifier = Modifier.weight(1f)
                         )
@@ -727,72 +704,20 @@ private fun AuroraAccountDialog(
                             }
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            HelperButton(
-                                text = if (availableAccounts.isEmpty()) "Select MicroG-RE Account" else "Other MicroG Account",
-                                onClick = {
-                                    val intent = AccountManager.newChooseAccountIntent(
-                                        null,
-                                        null,
-                                        tokenProvider.getSupportedAccountTypes(),
-                                        null,
-                                        null,
-                                        null,
-                                        null
-                                    )
-                                    accountChooserLauncher.launch(intent)
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                            HelperOutlinedButton(
-                                text = "Enter Token",
-                                onClick = {
-                                    inputEmail = settings.auroraEmail.orEmpty()
-                                    inputToken = settings.auroraAuthToken.orEmpty()
-                                    inputType = settings.auroraTokenType
-                                    showManualDialog = true
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "Custom Token Dispenser (BYOD)",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Optional fallback endpoint for anonymous sessions when public servers are busy.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        OutlinedTextField(
-                            value = inputCustomDispenser,
-                            onValueChange = {
-                                inputCustomDispenser = it
-                                onSettingsChange(
-                                    settings.copy(
-                                        auroraCustomDispenser = it.trim().takeIf { s -> s.isNotBlank() }
-                                    )
+                        HelperButton(
+                            text = if (availableAccounts.isEmpty()) "Select MicroG-RE Account" else "Other MicroG Account",
+                            onClick = {
+                                val intent = AccountManager.newChooseAccountIntent(
+                                    null,
+                                    null,
+                                    tokenProvider.getSupportedAccountTypes(),
+                                    null,
+                                    null,
+                                    null,
+                                    null
                                 )
+                                accountChooserLauncher.launch(intent)
                             },
-                            placeholder = { Text("https://auroraoss.com/api/auth") },
-                            singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -806,84 +731,6 @@ private fun AuroraAccountDialog(
             )
         }
     )
-
-    if (showManualDialog) {
-        AlertDialog(
-            onDismissRequest = { showManualDialog = false },
-            title = { Text("Google Play Account Token") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Enter your Google email and auth token (OAuth or AAS token) to authorize direct downloads.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = inputEmail,
-                        onValueChange = { inputEmail = it },
-                        label = { Text("Email (e.g. user@gmail.com)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = inputToken,
-                        onValueChange = { inputToken = it },
-                        label = { Text("Account Token") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Type:", style = MaterialTheme.typography.labelMedium)
-                        listOf("AUTH", "AAS").forEach { type ->
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (inputType == type) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.clickable { inputType = type }
-                            ) {
-                                Text(
-                                    text = type,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = if (inputType == type) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (inputType == type) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                HelperButton(
-                    text = "Save",
-                    onClick = {
-                        val cleanToken = inputToken.trim()
-                        val cleanEmail = inputEmail.trim()
-                        if (cleanToken.isNotBlank()) {
-                            onSettingsChange(
-                                settings.copy(
-                                    auroraEmail = cleanEmail.ifBlank { null },
-                                    auroraAuthToken = cleanToken,
-                                    auroraTokenType = inputType
-                                )
-                            )
-                            showManualDialog = false
-                            Toast.makeText(context, "Account token saved", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Token cannot be empty", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                )
-            },
-            dismissButton = {
-                HelperOutlinedButton(
-                    text = "Cancel",
-                    onClick = { showManualDialog = false }
-                )
-            }
-        )
-    }
 }
 
 @Composable
@@ -1422,7 +1269,6 @@ internal fun HelperSettingsScreen(
                                 subtitle = when (settings.networkPolicy) {
                                     NetworkPolicy.WIFI_AND_MOBILE -> "Wi-Fi & Mobile data allowed"
                                     NetworkPolicy.WIFI_ONLY -> "Wi-Fi connections only"
-                                    NetworkPolicy.MOBILE_DATA_ONLY -> "Mobile data only"
                                 },
                                 onClick = { policyDialog = true }
                             )
@@ -1465,7 +1311,7 @@ internal fun HelperSettingsScreen(
                             SettingsSwitchItem(
                                 icon = Icons.Outlined.CleaningServices,
                                 title = "Auto-clear Cache",
-                                subtitle = "Purge temporary APKs after returning to Morphe",
+                                subtitle = "Purge temporary download after Morphe saves its copy",
                                 checked = settings.deleteTemporaryAfterHandoff,
                                 onToggle = {
                                     onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = !settings.deleteTemporaryAfterHandoff))
@@ -1540,25 +1386,6 @@ internal fun HelperSettingsScreen(
                                     }
                                 },
                                 onClick = { historyDialog = true }
-                            )
-                        }
-                    }
-                }
-
-                // 3. Diagnostics & Logs
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MorpheSectionTitle(text = "Diagnostics & Logs", icon = Icons.Outlined.BugReport)
-                    SectionCard {
-                        Column {
-                            // Log to Logcat
-                            SettingsSwitchItem(
-                                icon = Icons.Outlined.Bolt,
-                                title = "Log to Logcat",
-                                subtitle = "Stream diagnostic events to ADB / system logcat",
-                                checked = settings.logcatLogging,
-                                onToggle = {
-                                    onSettingsChange(settings.copy(logcatLogging = !settings.logcatLogging))
-                                }
                             )
                         }
                     }
@@ -1681,7 +1508,6 @@ private fun SettingsPreferencesDetail(
                         subtitle = when (settings.networkPolicy) {
                             NetworkPolicy.WIFI_AND_MOBILE -> "Wi-Fi & Mobile data allowed"
                             NetworkPolicy.WIFI_ONLY -> "Wi-Fi connections only"
-                            NetworkPolicy.MOBILE_DATA_ONLY -> "Mobile data only"
                         },
                         trailing = {
                             Row(
@@ -1739,10 +1565,10 @@ private fun SettingsPreferencesDetail(
             }
         }
 
-        // Section 3: Automation & Diagnostics
+        // Section 3: Automation
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                text = "Automation & Diagnostics",
+                text = "Automation",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -1762,23 +1588,11 @@ private fun SettingsPreferencesDetail(
 
                     SettingsSwitchItem(
                         icon = Icons.Outlined.CleaningServices,
-                        title = "Auto-clear handoff",
-                        subtitle = "Purge temporary APK hand-off files after delivery to Morphe",
+                        title = "Auto-clear Cache",
+                        subtitle = "Purge temporary download after Morphe saves its copy",
                         checked = settings.deleteTemporaryAfterHandoff,
                         onToggle = {
                             onSettingsChange(settings.copy(deleteTemporaryAfterHandoff = !settings.deleteTemporaryAfterHandoff))
-                        }
-                    )
-
-                    MorpheDivider(fullWidth = true)
-
-                    SettingsSwitchItem(
-                        icon = Icons.Outlined.Bolt,
-                        title = "Log to Logcat",
-                        subtitle = "Stream detailed Morphe Fetch diagnostic events to Android Logcat / ADB",
-                        checked = settings.logcatLogging,
-                        onToggle = {
-                            onSettingsChange(settings.copy(logcatLogging = !settings.logcatLogging))
                         }
                     )
                 }

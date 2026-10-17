@@ -11,18 +11,10 @@ import java.io.File
 
 internal const val PREFS_NAME = "helper_settings"
 
-/**
- * Mirrors the user's Logcat preference so long-lived clients (built before
- * settings load) can check it per request without holding a Context.
- */
-@Volatile
-internal var logcatLoggingEnabled = true
-
 internal data class HelperSettings(
     val downloadLocation: DownloadLocation = DownloadLocation.TEMPORARY,
     val networkPolicy: NetworkPolicy = NetworkPolicy.WIFI_AND_MOBILE,
     val deleteTemporaryAfterHandoff: Boolean = true,
-    val logcatLogging: Boolean = true,
     val autoDownloadBestMatch: Boolean = false,
     val disabledSources: Set<DownloadSource> = emptySet(),
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -75,10 +67,6 @@ internal enum class NetworkPolicy(
         title = "Wi-Fi only",
         description = "Use Wi-Fi for source checks and downloads."
     ),
-    MOBILE_DATA_ONLY(
-        title = "Mobile data only",
-        description = "Use cellular data and pause when Wi-Fi is active."
-    ),
     WIFI_AND_MOBILE(
         title = "Wi-Fi or mobile data",
         description = "Use whichever connection Android is already using."
@@ -104,11 +92,6 @@ internal enum class NetworkPolicy(
             } else {
                 null
             }
-            MOBILE_DATA_ONLY -> if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-                "Helper is set to mobile data only. Switch to mobile data or change Helper settings."
-            } else {
-                null
-            }
             WIFI_AND_MOBILE -> null
         }
     }
@@ -126,7 +109,6 @@ internal fun Context.loadHelperSettings(): HelperSettings {
             NetworkPolicy.WIFI_AND_MOBILE
         ),
         deleteTemporaryAfterHandoff = prefs.getBoolean("delete_temporary_after_handoff", true),
-        logcatLogging = prefs.getBoolean("logcat_logging", true),
         autoDownloadBestMatch = prefs.getBoolean("auto_download_best_match", false),
         disabledSources = prefs.getStringSet("disabled_sources", emptySet())
             .orEmpty()
@@ -143,18 +125,15 @@ internal fun Context.loadHelperSettings(): HelperSettings {
         auroraTokenType = prefs.getString("aurora_token_type", "AUTH") ?: "AUTH",
         auroraCustomDispenser = prefs.getString("aurora_custom_dispenser", null)?.takeIf { it.isNotBlank() }
     )
-    logcatLoggingEnabled = settings.logcatLogging
     return settings
 }
 
 internal fun Context.saveHelperSettings(settings: HelperSettings) {
-    logcatLoggingEnabled = settings.logcatLogging
     getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .edit()
         .putString("download_location", settings.downloadLocation.name)
         .putString("network_policy", settings.networkPolicy.name)
         .putBoolean("delete_temporary_after_handoff", settings.deleteTemporaryAfterHandoff)
-        .putBoolean("logcat_logging", settings.logcatLogging)
         .putBoolean("auto_download_best_match", settings.autoDownloadBestMatch)
         .putStringSet("disabled_sources", settings.disabledSources.map { it.name }.toSet())
         .putString("theme_mode", settings.themeMode.name)

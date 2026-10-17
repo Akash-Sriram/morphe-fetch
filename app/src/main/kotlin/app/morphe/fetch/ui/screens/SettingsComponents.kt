@@ -536,7 +536,6 @@ internal fun DownloadLocation.icon(): ImageVector = when (this) {
 
 internal fun NetworkPolicy.icon(): ImageVector = when (this) {
     NetworkPolicy.WIFI_ONLY -> Icons.Outlined.Wifi
-    NetworkPolicy.MOBILE_DATA_ONLY -> Icons.Outlined.SignalCellularAlt
     NetworkPolicy.WIFI_AND_MOBILE -> Icons.Outlined.NetworkCheck
 }
 
