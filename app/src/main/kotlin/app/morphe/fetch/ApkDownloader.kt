@@ -3,6 +3,7 @@ package app.morphe.fetch
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.SequenceInputStream
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.delay
@@ -95,6 +96,13 @@ internal class ApkDownloader(
                             onProgress(copied, total)
                         }
                     }
+                }
+                val contentEncoding = response.header("Content-Encoding")
+                val isIdentity = contentEncoding.isNullOrEmpty() || contentEncoding.equals("identity", ignoreCase = true)
+                if (isIdentity && total > 0L && target.length() < total) {
+                    throw IOException(
+                        "Truncated download for ${target.name}: expected $total bytes, received ${target.length()} bytes"
+                    )
                 }
                 return DownloadResult(finalUrl, contentDisposition)
             }

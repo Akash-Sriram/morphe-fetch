@@ -18,7 +18,9 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipFile
 
 internal data class GitHubRelease(
     @SerializedName("tag_name") val tagName: String = "",
@@ -84,7 +86,7 @@ internal class AppUpdater(
             throw IllegalStateException("Failed to check for updates: HTTP ${response.code}")
         }
 
-        val json = response.body?.string() ?: throw IllegalStateException("Empty response from GitHub")
+        val json = response.body.string()
         val release = gson.fromJson(json, GitHubRelease::class.java)
 
         val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
@@ -113,8 +115,12 @@ internal class AppUpdater(
         val targetFile = File(updatesDir, "morphe-fetch-${info.tagName}.apk")
 
         if (targetFile.exists() && targetFile.length() == info.apkSize && info.apkSize > 0) {
-            onProgress(1.0f, info.apkSize, info.apkSize)
-            return@withContext targetFile
+            if (validateApkArchive(targetFile, info.apkSize) == null) {
+                onProgress(1.0f, info.apkSize, info.apkSize)
+                return@withContext targetFile
+            } else {
+                targetFile.delete()
+            }
         }
 
         val request = Request.Builder()
@@ -127,42 +133,65 @@ internal class AppUpdater(
             throw IllegalStateException("Download failed with HTTP ${response.code}")
         }
 
-        val body = response.body ?: throw IllegalStateException("Empty body from APK download")
+        val body = response.body
         val contentLength = if (body.contentLength() > 0) body.contentLength() else info.apkSize
 
         val tempFile = File(updatesDir, "download-${System.currentTimeMillis()}.tmp")
-        tempFile.outputStream().use { output ->
-            body.byteStream().use { input ->
-                val buffer = ByteArray(8192)
-                var bytesRead: Int
-                var totalBytesRead = 0L
+        try {
+            tempFile.outputStream().use { output ->
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    var totalBytesRead = 0L
 
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    output.write(buffer, 0, bytesRead)
-                    totalBytesRead += bytesRead
-                    val progress = if (contentLength > 0) {
-                        (totalBytesRead.toFloat() / contentLength.toFloat()).coerceIn(0f, 1f)
-                    } else {
-                        0f
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        totalBytesRead += bytesRead
+                        val progress = if (contentLength > 0) {
+                            (totalBytesRead.toFloat() / contentLength.toFloat()).coerceIn(0f, 1f)
+                        } else {
+                            0f
+                        }
+                        onProgress(progress, totalBytesRead, contentLength)
                     }
-                    onProgress(progress, totalBytesRead, contentLength)
+                    output.flush()
+
+                    if (contentLength > 0 && totalBytesRead != contentLength) {
+                        throw IOException(
+                            "Truncated download: expected $contentLength bytes, received $totalBytesRead bytes"
+                        )
+                    }
                 }
-                output.flush()
             }
-        }
 
-        if (targetFile.exists()) targetFile.delete()
-        if (!tempFile.renameTo(targetFile)) {
-            tempFile.copyTo(targetFile, overwrite = true)
+            val archiveError = validateApkArchive(tempFile, contentLength)
+            if (archiveError != null) {
+                throw IllegalStateException("Downloaded update failed integrity check: $archiveError")
+            }
+
+            if (targetFile.exists()) targetFile.delete()
+            if (!tempFile.renameTo(targetFile)) {
+                tempFile.copyTo(targetFile, overwrite = true)
+                tempFile.delete()
+            }
+
+            targetFile
+        } catch (e: Throwable) {
             tempFile.delete()
+            throw e
         }
-
-        targetFile
     }
 
     fun installApk(context: Context, apkFile: File) {
         if (!apkFile.exists()) {
             throw IllegalStateException("Update file does not exist: ${apkFile.absolutePath}")
+        }
+
+        try {
+            validateUpdateApk(context, apkFile)
+        } catch (e: Throwable) {
+            apkFile.delete()
+            throw e
         }
 
         val authority = "${context.packageName}.files"
@@ -175,6 +204,50 @@ internal class AppUpdater(
         }
 
         context.startActivity(installIntent)
+    }
+
+    fun validateUpdateApk(context: Context, apkFile: File, expectedSize: Long = 0L) {
+        val archiveError = validateApkArchive(apkFile, expectedSize)
+        if (archiveError != null) {
+            throw IllegalStateException("Invalid update archive: $archiveError")
+        }
+
+        val pm = context.packageManager
+        val archive = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            }
+        } catch (e: Exception) {
+            null
+        } ?: throw IllegalStateException("Could not parse Android package information from update file.")
+
+        if (archive.packageName != context.packageName) {
+            throw IllegalStateException(
+                "Package mismatch: expected ${context.packageName}, got ${archive.packageName}"
+            )
+        }
+
+        val installedSignatures = getSignatures(context, context.packageName, null)
+        val updateSignatures = getSignatures(context, null, apkFile.absolutePath)
+
+        if (installedSignatures.isEmpty()) {
+            throw IllegalStateException("Installed application signing certificates could not be verified.")
+        }
+        if (updateSignatures.isEmpty()) {
+            throw IllegalStateException("Downloaded update contains no readable signing certificates.")
+        }
+
+        val matches = updateSignatures.any { updateSig ->
+            installedSignatures.any { installedSig ->
+                updateSig.contentEquals(installedSig)
+            }
+        }
+        if (!matches) {
+            throw IllegalStateException("Signature mismatch: update package was signed with a different key.")
+        }
     }
 
     fun canInstallPackages(context: Context): Boolean {
@@ -250,4 +323,69 @@ internal class AppUpdater(
         const val NOTIFICATION_ID = 2001
     }
 }
+
+internal fun validateApkArchive(apkFile: File, expectedSize: Long = 0L): String? {
+    if (!apkFile.isFile || apkFile.length() <= 0L) {
+        return "the file is empty or does not exist"
+    }
+
+    if (expectedSize > 0L && apkFile.length() != expectedSize) {
+        return "size mismatch: expected $expectedSize bytes, got ${apkFile.length()} bytes"
+    }
+
+    val entries = try {
+        ZipFile(apkFile).use { zip ->
+            zip.entries().asSequence().map { it.name }.toSet()
+        }
+    } catch (e: Exception) {
+        return "corrupted or incomplete archive: ${e.message}"
+    }
+
+    if (!entries.contains("AndroidManifest.xml")) {
+        return "not an APK: AndroidManifest.xml is missing"
+    }
+
+    if (entries.none { it.startsWith("classes") && it.endsWith(".dex") }) {
+        return "not an APK: DEX executable code is missing"
+    }
+
+    return null
+}
+
+@Suppress("DEPRECATION")
+internal fun getSignatures(context: Context, packageName: String?, apkPath: String?): List<ByteArray> {
+    val pm = context.packageManager
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val flags = PackageManager.GET_SIGNING_CERTIFICATES
+            val packageInfo = if (apkPath != null) {
+                pm.getPackageArchiveInfo(apkPath, flags)
+            } else if (packageName != null) {
+                pm.getPackageInfo(packageName, flags)
+            } else null
+
+            val signingInfo = packageInfo?.signingInfo
+            val signatures = when {
+                signingInfo == null -> null
+                signingInfo.hasMultipleSigners() -> signingInfo.apkContentsSigners
+                else -> signingInfo.signingCertificateHistory
+            }
+            val result = signatures?.map { it.toByteArray() }
+            if (!result.isNullOrEmpty()) {
+                return result
+            }
+        }
+
+        val flags = PackageManager.GET_SIGNATURES
+        val packageInfo = if (apkPath != null) {
+            pm.getPackageArchiveInfo(apkPath, flags)
+        } else if (packageName != null) {
+            pm.getPackageInfo(packageName, flags)
+        } else null
+        packageInfo?.signatures?.map { it.toByteArray() } ?: emptyList()
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
 

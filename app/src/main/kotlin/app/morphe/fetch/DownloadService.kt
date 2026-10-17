@@ -817,7 +817,9 @@ internal fun validateDownloadedArtifact(
     if (validation == null) {
         val isValidArchive = runCatching {
             java.util.zip.ZipFile(file).use { zip ->
-                zip.getEntry("AndroidManifest.xml") != null ||
+                val hasDex = zip.entries().asSequence().any { it.name.startsWith("classes") && it.name.endsWith(".dex") }
+                val hasManifest = zip.getEntry("AndroidManifest.xml") != null
+                (hasManifest && hasDex) ||
                     zip.entries().asSequence().any { it.name.endsWith(".apk", ignoreCase = true) }
             }
         }.getOrDefault(false)
@@ -827,7 +829,7 @@ internal fun validateDownloadedArtifact(
         } else {
             check(!shouldValidateMetadata) {
                 file.delete()
-                "Downloaded file could not be read as an APK.".withManualModeHint()
+                "Downloaded file could not be read as an APK (corrupted archive or missing classes.dex).".withManualModeHint()
             }
             return file
         }
