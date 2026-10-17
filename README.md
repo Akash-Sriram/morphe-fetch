@@ -34,37 +34,6 @@ A hard fork of [`helper-for-morphe`](https://github.com/rushiranpise/helper-for-
 
 ---
 
-## Download & Installation
-
-Download the latest signed release APK from [GitHub Releases](https://github.com/Akash-Sriram/morphe-fetch/releases/latest).
-
-```bash
-# Install to connected device via ADB
-adb install -r morphe-fetch-v1.5.2.apk
-```
-
----
-
-## Building from Source
-
-Morphe Fetch uses Gradle with Kotlin DSL. Requirements: **JDK 17** and **Android SDK 36**.
-
-```bash
-# Build debug APK
-./gradlew :app:assembleDebug
-
-# Build optimized & minified release APK
-./gradlew :app:assembleRelease
-
-# Run unit tests
-./gradlew :app:testDebugUnitTest
-```
-
-Output binary:
-`app/build/outputs/apk/release/app-release.apk`
-
----
-
 ## License
 
 Licensed under the [GNU General Public License v3.0](LICENSE).
