@@ -975,19 +975,37 @@ internal fun AppSourceCard(
 internal fun isPackageOrPatchedInstalled(packageName: String, installedPackages: Set<String>): Boolean {
     if (packageName.isBlank()) return false
     if (packageName in installedPackages) return true
-    var core = packageName
-    for (prefix in listOf("com.google.", "com.", "org.", "io.", "net.")) {
-        if (core.startsWith(prefix)) {
-            core = core.removePrefix(prefix)
-            break
+
+    val prefixes = listOf("com.google.android.apps.", "com.google.android.", "com.google.", "com.", "org.", "net.", "io.")
+    val brandPrefixes = listOf("app.morphe.", "app.revanced.", "app.rvx.")
+
+    val candidates = buildList {
+        for (brand in brandPrefixes) {
+            add("$brand$packageName")
+        }
+        for (prefix in prefixes) {
+            if (packageName.startsWith(prefix)) {
+                val rest = packageName.removePrefix(prefix)
+                if (rest.isNotBlank()) {
+                    for (brand in brandPrefixes) {
+                        add("$brand$rest")
+                        add("${brand}android.$rest")
+                    }
+                    if (rest.endsWith(".android")) {
+                        val withoutAndroid = rest.removeSuffix(".android")
+                        if (withoutAndroid.isNotBlank()) {
+                            for (brand in brandPrefixes) {
+                                add("$brand$withoutAndroid")
+                                add("${brand}android.$withoutAndroid")
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-    return installedPackages.any { installed ->
-        installed == "app.morphe.$packageName" ||
-        installed == "app.revanced.$packageName" ||
-        ((installed.startsWith("app.morphe.") || installed.startsWith("app.revanced.")) &&
-            (installed.endsWith(core) || core.endsWith(installed.removePrefix("app.morphe.").removePrefix("app.revanced."))))
-    }
+
+    return candidates.any { it in installedPackages }
 }
 
 @Composable

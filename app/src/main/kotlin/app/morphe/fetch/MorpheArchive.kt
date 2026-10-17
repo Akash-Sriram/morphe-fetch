@@ -519,17 +519,21 @@ internal object MorpheArchive {
         }
     }
 
-    suspend fun getOrFetchIndex(context: Context? = null): MorpheArchiveIndex {
-        cachedIndex?.let { return it }
-        if (context != null) {
-            loadFromDisk(context)?.let { return it }
-        }
-        return fetchMutex.withLock {
+    suspend fun getOrFetchIndex(context: Context? = null, forceNetwork: Boolean = false): MorpheArchiveIndex {
+        if (!forceNetwork) {
             cachedIndex?.let { return it }
             if (context != null) {
                 loadFromDisk(context)?.let { return it }
             }
-            runCatching { fetchIndex(context) }
+        }
+        return fetchMutex.withLock {
+            if (!forceNetwork) {
+                cachedIndex?.let { return it }
+                if (context != null) {
+                    loadFromDisk(context)?.let { return it }
+                }
+            }
+            runCatching { fetchIndex(context, forceNetwork = true) }
                 .onFailure { Log.w(TAG, "Failed to fetch archive index", it) }
                 .getOrElse { cachedIndex ?: MorpheArchiveIndex() }
         }

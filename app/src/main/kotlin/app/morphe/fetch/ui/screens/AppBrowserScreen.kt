@@ -82,20 +82,20 @@ internal fun AppBrowserScreen(
     val context = LocalContext.current
     var favourites by remember { mutableStateOf<Set<String>>(emptySet()) }
     var installedPackages by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var isRefreshing by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        favourites = MorpheFavourites.loadAsync(context)
-        installedPackages = withContext(Dispatchers.IO) {
-            context.packageManager.getInstalledApplications(0)
-                .mapNotNull { it.packageName.takeIf(String::isNotBlank) }
-                .toSet()
-        }
-    }
-
     LaunchedEffect(loadKey) {
         error = null
+        favourites = MorpheFavourites.loadAsync(context)
+        installedPackages = withContext(Dispatchers.IO) {
+            runCatching {
+                context.packageManager.getInstalledPackages(0)
+                    .mapNotNull { it.packageName.takeIf(String::isNotBlank) }
+                    .toSet()
+            }.getOrElse { emptySet() }
+        }
         if (loadKey > 0) {
             AppIconResolver.clearMissingIcons()
         }
@@ -112,9 +112,10 @@ internal fun AppBrowserScreen(
             sources = null
         }
 
+        isRefreshing = true
         try {
             val index = withContext(Dispatchers.IO) {
-                MorpheArchive.fetchIndex(context, forceNetwork = (loadKey > 0 || cached == null))
+                MorpheArchive.fetchIndex(context, forceNetwork = true)
             }
             apps = index.apps.sortedBy { it.name.lowercase(Locale.US) }
             sources = index.repos.sortedBy { it.displayName.lowercase(Locale.US) }
@@ -124,6 +125,8 @@ internal fun AppBrowserScreen(
             if (apps == null && sources == null) {
                 error = e.message ?: "Failed to load the archive index"
             }
+        } finally {
+            isRefreshing = false
         }
     }
 
@@ -252,9 +255,13 @@ internal fun AppBrowserScreen(
                         } else {
                             append(apps?.let { "${it.size} apps with patches" } ?: "Morphe patch archive")
                         }
-                        fresh?.let { append(" · index ${it.label}") }
+                        if (isRefreshing && apps != null) {
+                            append(" · updating…")
+                        } else {
+                            fresh?.let { append(" · index ${it.label}") }
+                        }
                     },
-                    color = if (fresh?.stale == true) {
+                    color = if (fresh?.stale == true && !isRefreshing) {
                         MaterialTheme.colorScheme.error
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -275,7 +282,7 @@ internal fun AppBrowserScreen(
             HelperHeaderIconButton(
                 icon = Icons.Outlined.Refresh,
                 contentDescription = "Refresh",
-                onClick = { loadKey++ },
+                onClick = { if (!isRefreshing) loadKey++ },
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
