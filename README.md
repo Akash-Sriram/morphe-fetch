@@ -1,32 +1,70 @@
-# Morphe Fetch
+# Morphe Fetch 📦
 
-Fast, native Android companion downloader for [Morphe Manager](https://github.com/MorpheApp) and standalone APK retriever.
+[![Latest Release](https://img.shields.io/github/v/release/Akash-Sriram/morphe-fetch?include_prereleases&color=007AFF&style=flat-square)](https://github.com/Akash-Sriram/morphe-fetch/releases/latest)
+[![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?style=flat-square&logo=android&logoColor=white)](https://developer.android.com)
+[![License](https://img.shields.io/github/license/Akash-Sriram/morphe-fetch?style=flat-square)](LICENSE)
+
+Fast, native Android companion downloader for [Morphe Manager](https://github.com/MorpheApp/morphe-manager) and standalone APK retriever.
 
 A hard fork of [`helper-for-morphe`](https://github.com/rushiranpise/helper-for-morphe) by [Rushi Ranpise](https://github.com/rushiranpise), maintained and evolved by [Akash Sriram](https://github.com/Akash-Sriram).
 
 ---
 
-### Features
+## Key Features
 
-- **Multi-Source Parallel Resolution** — Concurrently queries all sources and prioritizes direct APK links.
-- **Headless Cloudflare Solver** — Background Turnstile solver and session warmer for zero-prompt downloads.
-- **Strict Package Verification** — Enforces exact package IDs to eliminate unhosted fallbacks and broken links.
-- **Universal Format Support** — Full support for `APK`, `APKM`, `APKS`, and `XAPK` with root manifest parsing.
-- **Morphe Manager Integration** — Seamless automated package resolution and installation handoff via intents.
-- **Fluid Search & Navigation** — Instant offline catalog search, architecture filters, and search-first back navigation.
-
----
-
-### Supported Sources
-
-- **Aurora Store** — Direct Google Play CDN downloads with anonymous check-in, device-tailored architectures, and split-APK delivery.
-- **APKMirror** — Direct variants, release dates, and automated session keeper.
-- **APKPure** — Version update API with device-matched architectures.
-- **APKCombo** — Direct API and variant streams.
-- **Uptodown** — CDN downloads with automated background Turnstile bypass.
+- **Multi-Source Parallel Resolution** — Concurrently queries all enabled sources (Google Play via Aurora, APKMirror, APKPure, and Uptodown) to fetch recommended architectures and compatible versions with zero manual link hunting.
+- **Find New Apps (Morphe Archive Explorer)** — Built-in catalog of 100+ patchable applications and community repositories. Features live GitHub catalog synchronization, offline fallback, favourites bookmarking, and smart installed/patched app status detection.
+- **Download Stream & Archive Integrity** — Validates network download streams against server content lengths, verifies ZIP/DEX file integrity before handoff, and extracts signing certificates to fail closed against corrupt downloads or malicious files.
+- **Headless Cloudflare Solver** — Background Turnstile solver, ad-blocking engine, and session keeper for seamless downloads on protected mirrors.
+- **Aurora Store & MicroG-RE Integration** — One-tap anonymous Google Play token acquisition via installed MicroG-RE or verified fallback dispensers for direct Play Store CDN delivery.
+- **Universal Format Support** — Fully parses, verifies, and packages standalone `APK` files as well as split bundles (`APKM`, `APKS`, and `XAPK`).
+- **Morphe Manager Integration** — Seamless automated handoff via Android intents (`ACTION_DOWNLOAD_ORIGINAL_APK`), automatically routing clean stock binaries directly to Morphe Manager's patching pipeline.
+- **Modern Jetpack Compose UI** — Material 3 dynamic color, edge-to-edge system bar support, pull-to-refresh, tablet two-pane layout, and responsive search navigation.
 
 ---
 
-### License
+## Supported Sources
 
-Licensed under the [GPL-3.0 License](LICENSE).
+| Source | Description | Features |
+|---|---|---|
+| **Aurora Store** | Direct Google Play CDN | Anonymous check-in via MicroG-RE, architecture filtering, split-APK delivery |
+| **APKMirror** | Verified community mirror | Architecture variants, release dates, automated session warmer |
+| **APKPure** | Versioned archive API | Fast direct CDN downloads with device-matched ABIs |
+| **Uptodown** | Global software directory | Background Turnstile bypass and direct variant downloads |
+
+---
+
+## Download & Installation
+
+Download the latest signed release APK from [GitHub Releases](https://github.com/Akash-Sriram/morphe-fetch/releases/latest).
+
+```bash
+# Install to connected device via ADB
+adb install -r morphe-fetch-v1.5.2.apk
+```
+
+---
+
+## Building from Source
+
+Morphe Fetch uses Gradle with Kotlin DSL. Requirements: **JDK 17** and **Android SDK 36**.
+
+```bash
+# Build debug APK
+./gradlew :app:assembleDebug
+
+# Build optimized & minified release APK
+./gradlew :app:assembleRelease
+
+# Run unit tests
+./gradlew :app:testDebugUnitTest
+```
+
+Output binary:
+`app/build/outputs/apk/release/app-release.apk`
+
+---
+
+## License
+
+Licensed under the [GNU General Public License v3.0](LICENSE).
