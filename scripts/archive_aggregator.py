@@ -645,6 +645,15 @@ class CatalogAggregator:
                 if not app_specific_patches:
                     continue
 
+                # Collect supported versions for this specific app from this repo
+                source_versions = set()
+                for p in app_specific_patches:
+                    for comp in p.get("compatiblePackages", []):
+                        if isinstance(comp, dict) and comp.get("name") == pkg:
+                            for v in comp.get("versions", []):
+                                if v:
+                                    source_versions.add(v)
+
                 app_src_desc = {
                     "repo": repo["repo"],
                     "host": repo["host"],
@@ -659,7 +668,8 @@ class CatalogAggregator:
                     "changelogUrl": repo.get("changelogUrl"),
                     "latestChanges": repo.get("latestChanges"),
                     "patchCount": len(app_specific_patches),
-                    "patches": [{"name": p["name"], "description": p.get("description")} for p in app_specific_patches]
+                    "patches": [{"name": p["name"], "description": p.get("description")} for p in app_specific_patches],
+                    "versions": sorted(source_versions)
                 }
 
                 app_entry = apps_map[pkg]

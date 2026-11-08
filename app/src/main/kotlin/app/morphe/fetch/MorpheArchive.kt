@@ -252,6 +252,7 @@ internal data class ArchiveSource(
     @SerializedName("source") val source: String? = null,
     @SerializedName("changelogUrl") val changelogUrl: String? = null,
     @SerializedName("patches") val patches: List<ArchivePatch> = emptyList(),
+    @SerializedName("versions") val versions: List<String> = emptyList(),
     @SerializedName("apps") val apps: List<ArchiveSourceApp> = emptyList(),
     /** The repo's latest release, used to rank otherwise identical sources. */
     @SerializedName("latestChanges") val latestChanges: ArchiveChanges? = null

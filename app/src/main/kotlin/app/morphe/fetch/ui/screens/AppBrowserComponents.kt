@@ -478,34 +478,14 @@ internal fun AppBrowserRow(
                 iconUrl = app.iconUrl
             )
             Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = app.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    if (app.isFeatured) {
-                        MorpheStatusBadge(
-                            text = "Featured",
-                            icon = Icons.Outlined.Star,
-                            tone = SemanticTone.Warning
-                        )
-                    }
-                    if (installed) {
-                        MorpheStatusBadge(
-                            text = "Installed",
-                            icon = Icons.Outlined.CheckCircle,
-                            tone = SemanticTone.Success
-                        )
-                    }
-                }
+                Text(
+                    text = app.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Text(
                     text = app.packageName,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -554,11 +534,25 @@ internal fun AppBrowserRow(
                         }
                     }
                 }
-                Row(
+                FlowRow(
                     modifier = Modifier.padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    if (app.isFeatured) {
+                        MorpheStatusBadge(
+                            text = "Featured",
+                            icon = Icons.Outlined.Star,
+                            tone = SemanticTone.Warning
+                        )
+                    }
+                    if (installed) {
+                        MorpheStatusBadge(
+                            text = "Installed",
+                            icon = Icons.Outlined.CheckCircle,
+                            tone = SemanticTone.Success
+                        )
+                    }
                     MorpheStatusBadge(
                         text = "${app.sourceCount} " + if (app.sourceCount == 1) "source" else "sources",
                         icon = Icons.Outlined.Dns,
@@ -760,13 +754,6 @@ internal fun AppDetailView(
                             icon = Icons.Outlined.Extension,
                             tone = SemanticTone.Primary
                         )
-                        if (app.versions.isNotEmpty()) {
-                            MorpheStatusBadge(
-                                text = "${app.versions.size} supported " + if (app.versions.size == 1) "version" else "versions",
-                                icon = Icons.Outlined.Layers,
-                                tone = SemanticTone.Neutral
-                            )
-                        }
                         app.formattedReleaseDate?.let { released ->
                             MorpheStatusBadge(
                                 text = "Updated $released",
@@ -783,42 +770,6 @@ internal fun AppDetailView(
                             onClick = { onGetApk(app.packageName, app.name) },
                             modifier = Modifier.fillMaxWidth()
                         )
-                    }
-                }
-            }
-        }
-        app.description?.takeIf { it.isNotBlank() }?.let { desc ->
-            item {
-                MorpheSectionTitle(text = "About", icon = Icons.Outlined.Info)
-            }
-            item {
-                SectionCard {
-                    Text(
-                        text = desc,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(MorpheDefaults.ContentPadding)
-                    )
-                }
-            }
-        }
-        if (app.versions.isNotEmpty()) {
-            item {
-                MorpheSectionTitle(text = "Supported Versions", icon = Icons.Outlined.Layers)
-            }
-            item {
-                SectionCard {
-                    FlowRow(
-                        modifier = Modifier.padding(MorpheDefaults.ContentPadding),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        app.versions.forEach { version ->
-                            MorpheStatusBadge(
-                                text = version,
-                                tone = SemanticTone.Neutral
-                            )
-                        }
                     }
                 }
             }
@@ -895,6 +846,20 @@ internal fun AppSourceCard(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val supportedText = remember(source.versions) {
+                        if (source.versions.isNotEmpty()) {
+                            "Supported: " + source.versions.joinToString(", ")
+                        } else {
+                            "Supported: Any version"
+                        }
+                    }
+                    Text(
+                        text = supportedText,
+                        color = colors.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
                 Icon(
                     imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
@@ -937,6 +902,13 @@ internal fun AppSourceCard(
                         Text(
                             text = "Identical Forks / Mirrors: " + source.mirrors.joinToString(", "),
                             color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    if (source.versions.isNotEmpty()) {
+                        Text(
+                            text = "Supported Versions: " + source.versions.joinToString(", "),
+                            color = colors.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
