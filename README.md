@@ -10,8 +10,12 @@ A hard fork of [`helper-for-morphe`](https://github.com/rushiranpise/helper-for-
 
 ---
 
-## 🔥 Key Highlights in v1.6.0
+## 🔥 Key Highlights in v1.6.1
 
+- 🎨 **Revamped App Detail & Browser UI**:
+  - **No Name Truncation**: App titles in search and browse results (such as *Google Photos*) now occupy the full primary line, preventing truncation. Status chips (`Featured`, `Installed`) neatly wrap in the metadata flow.
+  - **Clean Hero Section**: Eliminated redundant "About" and global "Supported Versions" clutter from app detail views.
+  - **Per-Source Supported Versions**: Each patch source card clearly displays its own specific compatible versions directly above the "Add to Morphe" button.
 - 🌐 **Multi-Source Catalog Aggregator**: Automatically aggregates and freshness-arbitrates repositories from both **Rush Archive** and **Morphe Patches / Awesome Morphe**. Enriched with Google Play Store metadata (official high-res icons, categories, descriptions, install counts, and featured app badges).
 - 🧩 **1,690+ Apps & 8,600+ Patches**: Live catalog indexed directly on `main` (`data/processed_archive.min.json`) with automated 6-hour GitHub Actions freshness updates.
 - 🛡️ **Zero-Release & Dead Repo Pruning**: Actively checks GitHub releases (`/releases/latest`) and automatically prunes deleted (404) or release-lacking repositories so users never encounter broken patch bundles.
