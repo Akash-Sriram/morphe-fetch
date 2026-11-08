@@ -62,7 +62,15 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
                 entries.forEach { entry ->
                     val versionName = entry.version?.trim()?.takeIf(String::isNotBlank) ?: return@forEach
                     val versionPageUrl = uptodownVersionPageUrl(entry) ?: return@forEach
-                    val fileKind = (entry.kindFile ?: entry.titleKindFile ?: "apk").lowercase(Locale.US)
+                    val rawKind = (entry.kindFile ?: entry.titleKindFile)?.lowercase(Locale.US)?.trim()
+                    val fileKind = when {
+                        rawKind == null -> "apk"
+                        "xapk" in rawKind -> "xapk"
+                        "apkm" in rawKind -> "apkm"
+                        "apks" in rawKind -> "apks"
+                        "apk" in rawKind -> "apk"
+                        else -> rawKind
+                    }
                     add(
                         DownloadCandidate(
                             source = DownloadSource.UPTODOWN,
@@ -83,9 +91,15 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
             }
         }
 
-        return candidates
+        val formatMatching = candidates.filter { it.formatMatches }
+        val pool = if (formatMatching.isNotEmpty()) formatMatching else candidates
+
+        return pool
+            .sortedWith { left, right ->
+                val cmp = compareVersionNames(right.versionName, left.versionName)
+                if (cmp != 0) cmp else compareByDescending<DownloadCandidate> { it.formatMatches }.compare(left, right)
+            }
             .distinctBy { it.versionName?.normalizedVersionName() }
-            .sortedWith { left, right -> compareVersionNames(right.versionName, left.versionName) }
     }
 
     override suspend fun resolveHistoryCandidate(
@@ -179,7 +193,8 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
 
         if (packageName != request.packageName) return emptyList()
 
-        val versionsDoc = runCatching { fetchDocument("${detailUrl.trimEnd('/')}/versions", referer = downloadPageUrl) }
+        val normalizedDetailUrl = detailUrl.trimEnd('/')
+        val versionsDoc = runCatching { fetchDocument("$normalizedDetailUrl/versions", referer = downloadPageUrl) }
             .getOrNull()
         val versionName = versionsDoc?.selectFirst(".version")?.text()?.trim()?.takeIf(String::isNotBlank)
             ?: doc.selectFirst(".detail .info .version")?.text()?.trim()?.takeIf(String::isNotBlank)
@@ -187,29 +202,40 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
                 .find(doc.text())
                 ?.groupValues
                 ?.getOrNull(1)
-        val fileKind = parseInfoTableValue(doc, "File type")?.lowercase(Locale.US) ?: "apk"
+        val rawKind = parseInfoTableValue(doc, "File type")?.lowercase(Locale.US)?.trim()
+        val fileKind = when {
+            rawKind == null -> "apk"
+            "xapk" in rawKind -> "xapk"
+            "apkm" in rawKind -> "apkm"
+            "apks" in rawKind -> "apks"
+            "apk" in rawKind -> "apk"
+            else -> rawKind
+        }
         val externalUrl = doc.selectFirst("#detail-download-button[data-url-ext]")
             ?.attr("data-url-ext")
             ?.normalizedHttpUrlOrNull()
-            // data-url-ext is the external target for apps Uptodown does not host
-            // (e.g. an "external" Play Store listing like Discord). Pointing at a
-            // store page is not a downloadable file, so don't treat it as a direct
-            // download  the row should fall back to opening the page instead.
             ?.takeUnless { it.isPlayStoreListing() }
             ?: uptodownDownloadUrlFromPage(doc)
-        val normalizedDetailUrl = detailUrl.trimEnd('/')
         val dataCode = versionsDoc?.let(::uptodownDataCode) ?: uptodownDataCode(doc)
-        dataCode
-            ?.let { code ->
-                uptodownSelectableVariants(
-                    request = request,
-                    detailUrl = normalizedDetailUrl,
-                    dataCode = code,
-                    pageDoc = doc,
-                    versionPageUrl = downloadPageUrl
-                )
-            }
-            .orEmpty()
+
+        val detailDoc = runCatching { fetchDocument(normalizedDetailUrl) }.getOrNull()
+        val variantDoc = listOfNotNull(doc, versionsDoc, detailDoc).firstOrNull {
+            it.selectFirst(".button.variants[data-version]") != null
+        }
+
+        val variants = if (dataCode != null && variantDoc != null) {
+            uptodownSelectableVariants(
+                request = request,
+                detailUrl = normalizedDetailUrl,
+                dataCode = dataCode,
+                pageDoc = variantDoc,
+                versionPageUrl = downloadPageUrl
+            )
+        } else {
+            emptyList()
+        }
+
+        val variantCandidates = variants
             .mapNotNull { variant ->
                 uptodownCandidateFromVersionVariant(
                     request = request,
@@ -221,41 +247,75 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
                 )
             }
             .distinctBy(DownloadCandidate::identityKey)
-            .takeIf(List<DownloadCandidate>::isNotEmpty)
-            ?.let { return it }
+
+        if (variantCandidates.isNotEmpty()) {
+            val formatMatching = variantCandidates.filter { it.formatMatches }
+            return if (formatMatching.isNotEmpty()) formatMatching else variantCandidates
+        }
+
+        if (!request.acceptsFormat(fileKind) && dataCode != null) {
+            val versionEntries = runCatching {
+                gson.fromJson(
+                    fetchText("$normalizedDetailUrl/apps/$dataCode/versions/1", referer = "$normalizedDetailUrl/versions"),
+                    UptodownVersionResponse::class.java
+                ).data
+            }.getOrDefault(emptyList())
+
+            val matchingApkEntry = versionEntries.firstOrNull { entry ->
+                val kind = (entry.kindFile ?: entry.titleKindFile ?: "").lowercase(Locale.US)
+                val entryVersion = entry.version?.trim()
+                request.acceptsFormat(kind) && (versionName == null || entryVersion?.versionNameEquals(versionName) == true)
+            } ?: versionEntries.firstOrNull { entry ->
+                val kind = (entry.kindFile ?: entry.titleKindFile ?: "").lowercase(Locale.US)
+                request.acceptsFormat(kind)
+            }
+
+            if (matchingApkEntry != null) {
+                val apkCandidates = uptodownCandidatesFromVersionEntry(
+                    request = request,
+                    detailUrl = normalizedDetailUrl,
+                    dataCode = dataCode,
+                    entry = matchingApkEntry,
+                    option = CandidateOption.LATEST
+                )
+                if (apkCandidates.isNotEmpty()) {
+                    return apkCandidates
+                }
+            }
+        }
 
         return listOf(
             DownloadCandidate(
-            source = DownloadSource.UPTODOWN,
-            name = request.appName,
-            packageName = request.packageName,
-            versionName = versionName,
-            versionCode = null,
-            url = externalUrl?.takeIf(String::isNotBlank) ?: downloadPageUrl,
-            fileKind = fileKind,
-            option = CandidateOption.LATEST,
-            directDownload = !externalUrl.isNullOrBlank(),
-            versionStatus = request.versionStatus(versionName, null),
-            formatMatches = request.acceptsFormat(fileKind),
-            note = if (externalUrl.isNullOrBlank() && uptodownPageUsesTurnstile(doc)) {
-                "Uptodown now requires solving a captcha before it reveals the download link. Open the link and download manually."
-            } else {
-                null
-            },
-            captchaUrl = if (externalUrl.isNullOrBlank() && uptodownPageUsesTurnstile(doc)) downloadPageUrl else null,
-            files = externalUrl
-                ?.takeIf(String::isNotBlank)
-                ?.let {
-                    listOf(
-                        CandidateDownloadFile(
-                            url = it,
-                            fileName = "${request.packageName}-${versionName ?: "latest"}-uptodown.$fileKind"
-                                .sanitizeFileName(),
-                            referer = downloadPageUrl
+                source = DownloadSource.UPTODOWN,
+                name = request.appName,
+                packageName = request.packageName,
+                versionName = versionName,
+                versionCode = null,
+                url = externalUrl?.takeIf(String::isNotBlank) ?: downloadPageUrl,
+                fileKind = fileKind,
+                option = CandidateOption.LATEST,
+                directDownload = !externalUrl.isNullOrBlank(),
+                versionStatus = request.versionStatus(versionName, null),
+                formatMatches = request.acceptsFormat(fileKind),
+                note = if (externalUrl.isNullOrBlank() && uptodownPageUsesTurnstile(doc)) {
+                    "Uptodown now requires solving a captcha before it reveals the download link. Open the link and download manually."
+                } else {
+                    null
+                },
+                captchaUrl = downloadPageUrl,
+                files = externalUrl
+                    ?.takeIf(String::isNotBlank)
+                    ?.let {
+                        listOf(
+                            CandidateDownloadFile(
+                                url = it,
+                                fileName = "${request.packageName}-${versionName ?: "latest"}-uptodown.$fileKind"
+                                    .sanitizeFileName(),
+                                referer = downloadPageUrl
+                            )
                         )
-                    )
-                }
-                .orEmpty()
+                    }
+                    .orEmpty()
             )
         )
     }
@@ -275,25 +335,33 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
         val dataCode = uptodownDataCode(versionsDoc)
             ?: uptodownDataCode(downloadDoc)
             ?: return emptyList()
-        val entry = uptodownRequestedVersionEntry(
+        val entries = uptodownRequestedVersionEntries(
             request = request,
             detailUrl = normalizedDetailUrl,
             dataCode = dataCode
-        ) ?: return emptyList()
-
-        return uptodownCandidatesFromVersionEntry(
-            request = request,
-            detailUrl = normalizedDetailUrl,
-            dataCode = dataCode,
-            entry = entry
         )
+        if (entries.isEmpty()) return emptyList()
+
+        val candidates = entries.flatMap { entry ->
+            uptodownCandidatesFromVersionEntry(
+                request = request,
+                detailUrl = normalizedDetailUrl,
+                dataCode = dataCode,
+                entry = entry,
+                option = CandidateOption.REQUESTED
+            )
+        }.distinctBy(DownloadCandidate::identityKey)
+
+        val formatMatching = candidates.filter { it.formatMatches }
+        return if (formatMatching.isNotEmpty()) formatMatching else candidates
     }
 
-    private fun uptodownRequestedVersionEntry(
+    private fun uptodownRequestedVersionEntries(
         request: HelperRequest,
         detailUrl: String,
         dataCode: String
-    ): UptodownVersionEntry? {
+    ): List<UptodownVersionEntry> {
+        val matches = mutableListOf<UptodownVersionEntry>()
         for (page in 1..5) {
             val entries = runCatching {
                 gson.fromJson(
@@ -304,22 +372,33 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
 
             if (entries.isEmpty()) break
 
-            entries
-                .firstOrNull { entry ->
-                    val versionName = entry.version?.trim()?.takeIf(String::isNotBlank)
-                    versionName != null && request.matchesRequestedVersion(versionName, null)
-                }
-                ?.let { return it }
+            val pageMatches = entries.filter { entry ->
+                val versionName = entry.version?.trim()?.takeIf(String::isNotBlank)
+                versionName != null && request.matchesRequestedVersion(versionName, null)
+            }
+            matches.addAll(pageMatches)
+
+            if (matches.any { entry ->
+                val kind = (entry.kindFile ?: entry.titleKindFile ?: "").lowercase(Locale.US)
+                request.acceptsFormat(kind)
+            }) {
+                break
+            }
         }
 
-        return null
+        val formatMatches = matches.filter { entry ->
+            val kind = (entry.kindFile ?: entry.titleKindFile ?: "").lowercase(Locale.US)
+            request.acceptsFormat(kind)
+        }
+        return if (formatMatches.isNotEmpty()) formatMatches else matches
     }
 
     private fun uptodownCandidatesFromVersionEntry(
         request: HelperRequest,
         detailUrl: String,
         dataCode: String,
-        entry: UptodownVersionEntry
+        entry: UptodownVersionEntry,
+        option: CandidateOption = CandidateOption.REQUESTED
     ): List<DownloadCandidate> {
         val versionName = entry.version?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
         val versionPageUrl = uptodownVersionPageUrl(entry) ?: return emptyList()
@@ -332,61 +411,70 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
             versionPageUrl = versionPageUrl
         )
 
-        variants
+        val variantCandidates = variants
             .mapNotNull { variant ->
                 uptodownCandidateFromVersionVariant(
                     request = request,
                     detailUrl = detailUrl,
                     versionPageUrl = versionPageUrl,
                     versionName = versionName,
-                    option = CandidateOption.REQUESTED,
+                    option = option,
                     variant = variant
                 )
             }
             .distinctBy(DownloadCandidate::identityKey)
-            .takeIf(List<DownloadCandidate>::isNotEmpty)
-            ?.let { return it }
 
-        val fileKind = (
+        if (variantCandidates.isNotEmpty()) {
+            val formatMatching = variantCandidates.filter { it.formatMatches }
+            return if (formatMatching.isNotEmpty()) formatMatching else variantCandidates
+        }
+
+        val rawKind = (
             entry.kindFile
                 ?: entry.titleKindFile
                 ?: parseInfoTableValue(pageDoc, "File type")
-                ?: "apk"
-            )
-            .lowercase(Locale.US)
+            )?.lowercase(Locale.US)?.trim()
+        val fileKind = when {
+            rawKind == null -> "apk"
+            "xapk" in rawKind -> "xapk"
+            "apkm" in rawKind -> "apkm"
+            "apks" in rawKind -> "apks"
+            "apk" in rawKind -> "apk"
+            else -> rawKind
+        }
         val directUrl = uptodownDownloadUrlFromPage(pageDoc)
 
         return listOf(
             DownloadCandidate(
-            source = DownloadSource.UPTODOWN,
-            name = request.appName,
-            packageName = request.packageName,
-            versionName = versionName,
-            versionCode = null,
-            url = directUrl ?: versionPageUrl,
-            fileKind = fileKind,
-            option = CandidateOption.REQUESTED,
-            directDownload = directUrl != null,
-            versionStatus = request.versionStatus(versionName, null),
-            formatMatches = request.acceptsFormat(fileKind),
-            note = if (directUrl == null && uptodownPageUsesTurnstile(pageDoc)) {
-                "Uptodown now requires solving a captcha before it reveals the download link. Open the link and download manually."
-            } else {
-                null
-            },
-            captchaUrl = if (directUrl == null && uptodownPageUsesTurnstile(pageDoc)) versionPageUrl else null,
-            files = directUrl
-                ?.let {
-                    listOf(
-                        CandidateDownloadFile(
-                            url = it,
-                            fileName = "${request.packageName}-$versionName-uptodown.$fileKind"
-                                .sanitizeFileName(),
-                            referer = versionPageUrl
+                source = DownloadSource.UPTODOWN,
+                name = request.appName,
+                packageName = request.packageName,
+                versionName = versionName,
+                versionCode = null,
+                url = directUrl ?: versionPageUrl,
+                fileKind = fileKind,
+                option = option,
+                directDownload = directUrl != null,
+                versionStatus = request.versionStatus(versionName, null),
+                formatMatches = request.acceptsFormat(fileKind),
+                note = if (directUrl == null && uptodownPageUsesTurnstile(pageDoc)) {
+                    "Uptodown now requires solving a captcha before it reveals the download link. Open the link and download manually."
+                } else {
+                    null
+                },
+                captchaUrl = versionPageUrl,
+                files = directUrl
+                    ?.let {
+                        listOf(
+                            CandidateDownloadFile(
+                                url = it,
+                                fileName = "${request.packageName}-$versionName-uptodown.$fileKind"
+                                    .sanitizeFileName(),
+                                referer = versionPageUrl
+                            )
                         )
-                    )
-                }
-                .orEmpty()
+                    }
+                    .orEmpty()
             )
         )
     }
@@ -400,15 +488,16 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
         variant: UptodownVariantFile
     ): DownloadCandidate? {
         val variantDownloadPage = "$detailUrl/download/${variant.fileId}-x"
-        val tokenDoc = fetchDocument(variantDownloadPage, referer = versionPageUrl)
+        val cached = UptodownResolvedUrlCache.get(variantDownloadPage)
+        val tokenDoc = if (cached == null) fetchDocument(variantDownloadPage, referer = versionPageUrl) else null
         val fileKind = variant.fileKind.lowercase(Locale.US)
-        val directUrl = uptodownDownloadUrlFromPage(tokenDoc)
+        val directUrl = cached?.downloadUrl ?: (tokenDoc?.let(::uptodownDownloadUrlFromPage))
         val variantLabel = variant.displayLabel()
         val variantFileSuffix = variantLabel.variantFileSuffix()
         // Uptodown's download page publishes the file's SHA-256 in its info
         // table. When present it verifies the downloaded bytes before handoff.
-        val expectedSha256 = uptodownSha256FromPage(tokenDoc)
-        val isTurnstileGated = directUrl == null && (uptodownPageUsesTurnstile(tokenDoc) || tokenDoc.selectFirst("#detail-download-button") != null)
+        val expectedSha256 = cached?.expectedSha256 ?: (tokenDoc?.let(::uptodownSha256FromPage))
+        val isTurnstileGated = directUrl == null && tokenDoc != null && (uptodownPageUsesTurnstile(tokenDoc) || tokenDoc.selectFirst("#detail-download-button") != null)
 
         if (directUrl == null && !isTurnstileGated) {
             return null
@@ -430,14 +519,15 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
             note = if (isTurnstileGated) {
                 "Uptodown requires verification before revealing this variant download."
             } else null,
-            captchaUrl = if (isTurnstileGated) variantDownloadPage else null,
+            captchaUrl = if (directUrl != null) null else variantDownloadPage,
             files = directUrl?.let {
                 listOf(
                     CandidateDownloadFile(
                         url = it,
                         fileName = "${request.packageName}-${versionName ?: option.name.lowercase(Locale.US)}-uptodown$variantFileSuffix.$fileKind"
                             .sanitizeFileName(),
-                        referer = variantDownloadPage,
+                        referer = cached?.referer ?: variantDownloadPage,
+                        cookieHeader = cached?.cookieHeader,
                         expectedSha256 = expectedSha256
                     )
                 )
@@ -476,9 +566,21 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
             ?: return emptyList()
         val variants = uptodownVariantFiles(Jsoup.parse(content, detailUrl))
 
-        return variants.filter { request.acceptsFormat(it.fileKind) }
-            .takeIf(List<UptodownVariantFile>::isNotEmpty)
-            ?: variants
+        val matching = variants.filter { request.acceptsFormat(it.fileKind) }
+        val pool = if (matching.isNotEmpty()) matching else variants
+        return pool.preferRunnableArch(request.availableAbis)
+    }
+
+    private fun List<UptodownVariantFile>.preferRunnableArch(
+        availableAbis: List<String>
+    ): List<UptodownVariantFile> {
+        if (isEmpty() || availableAbis.isEmpty()) return this
+        val ranked = sortedBy { archMatchRank(it.archLabel, availableAbis) }
+        val runnable = ranked.filter { archMatchRank(it.archLabel, availableAbis) < ARCH_RANK_MISMATCH }
+        val pool = runnable.ifEmpty { ranked }
+        val bestRank = pool.minOfOrNull { archMatchRank(it.archLabel, availableAbis) } ?: return this
+        val bestPool = pool.filter { archMatchRank(it.archLabel, availableAbis) == bestRank }
+        return bestPool.ifEmpty { this }
     }
 
     private fun uptodownVariantFiles(doc: Document): List<UptodownVariantFile> {
@@ -499,11 +601,18 @@ internal class UptodownParser(private val ctx: SourceParserContext) : ApkSourceP
             ?.attr("data-file-id")
             ?.takeIf(String::isNotBlank)
             ?: return null
-        val fileKind = element.selectFirst(".v-file span")
+        val rawKind = element.selectFirst(".v-file span")
             ?.text()
             ?.lowercase(Locale.US)
-            ?.takeIf(String::isNotBlank)
-            ?: "apk"
+            ?.trim()
+        val fileKind = when {
+            rawKind == null -> "apk"
+            "xapk" in rawKind -> "xapk"
+            "apkm" in rawKind -> "apkm"
+            "apks" in rawKind -> "apks"
+            "apk" in rawKind -> "apk"
+            else -> rawKind
+        }
 
         return UptodownVariantFile(
             fileId = fileId,

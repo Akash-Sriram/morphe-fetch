@@ -15,10 +15,10 @@ internal object NativeDeviceProfileProvider {
     private const val GMS_PACKAGE = "com.google.android.gms"
     private const val VENDING_PACKAGE = "com.android.vending"
 
-    // Certified defaults tested and working across Google Play API
-    private const val DEFAULT_GSF_VERSION = "203019037"
-    private const val DEFAULT_VENDING_VERSION = "82151710"
-    private const val DEFAULT_VENDING_VERSION_STRING = "21.5.17-21 [0] [PR] 326734551"
+    // Certified defaults tested and working across Google Play API (Android 15 Pixel baseline)
+    private const val DEFAULT_GSF_VERSION = "251333035"
+    private const val DEFAULT_VENDING_VERSION = "84582130"
+    private const val DEFAULT_VENDING_VERSION_STRING = "45.8.21-31 [0] [PR] 747433787"
     private const val DEFAULT_GL_VERSION = "196610" // OpenGL ES 3.2
 
     fun getDeviceProperties(context: Context): Properties {
@@ -125,11 +125,11 @@ internal object NativeDeviceProfileProvider {
                     pm.getPackageInfo(VENDING_PACKAGE, 0)
                 }
                 val vendingCode = PackageInfoCompat.getLongVersionCode(vendingInfo)
-                if (vendingCode > 0) {
+                if (vendingCode >= DEFAULT_VENDING_VERSION.toLong()) {
                     properties.setProperty("Vending.version", vendingCode.toString())
-                }
-                vendingInfo.versionName?.takeIf { it.isNotBlank() }?.let {
-                    properties.setProperty("Vending.versionString", it)
+                    vendingInfo.versionName?.takeIf { it.isNotBlank() }?.let {
+                        properties.setProperty("Vending.versionString", it)
+                    }
                 }
             }
         }

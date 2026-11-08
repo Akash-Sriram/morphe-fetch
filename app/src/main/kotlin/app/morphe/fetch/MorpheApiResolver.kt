@@ -22,8 +22,12 @@ internal object MorpheApiResolver {
         return "$MORPHE_API_URL/v2/web-search/$encodedQuery"
     }
 
+    private val answersCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     suspend fun resolve(packageName: String, version: String?, abi: String? = null): String? =
         withContext(Dispatchers.IO) {
+            val queryKey = "$packageName~${version ?: "any"}~${abi ?: "arm64-v8a"}"
+            answersCache[queryKey]?.let { return@withContext it }
             val url = buildQueryUrl(packageName, version, abi)
             runCatching {
                 val request = Request.Builder()
@@ -35,6 +39,7 @@ internal object MorpheApiResolver {
                         val finalUrl = response.request.url.toString()
                         if (!finalUrl.contains("/v2/web-search/")) {
                             Log.d(TAG, "Resolved indexed URL: $finalUrl for $packageName $version")
+                            answersCache[queryKey] = finalUrl
                             return@use finalUrl
                         }
                     }
@@ -45,3 +50,14 @@ internal object MorpheApiResolver {
             }.getOrNull()
         }
 }
+
+/**
+ * Detects the [DownloadSource] a resolved URL belongs to.
+ */
+internal fun morpheResolvedSource(url: String): DownloadSource? = when {
+    url.contains("apkmirror.com", ignoreCase = true) -> DownloadSource.APK_MIRROR
+    url.contains("uptodown.com", ignoreCase = true) -> DownloadSource.UPTODOWN
+    url.contains("apkpure.com", ignoreCase = true) -> DownloadSource.APK_PURE
+    else -> null
+}
+

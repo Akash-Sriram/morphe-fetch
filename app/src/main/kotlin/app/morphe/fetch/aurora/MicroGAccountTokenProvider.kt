@@ -82,8 +82,22 @@ internal class MicroGAccountTokenProvider(
     } catch (exception: IOException) {
         Log.w(TAG, "Network unreachable while checking session validity, preserving cached session: ${exception.message}")
         true
-    } catch (_: Exception) {
-        false
+    } catch (e: Exception) {
+        val msg = e.message.orEmpty()
+        val isNetworkOrTransient = msg.contains("timeout", ignoreCase = true) ||
+            msg.contains("connect", ignoreCase = true) ||
+            msg.contains("reset", ignoreCase = true) ||
+            msg.contains("429") ||
+            e is java.net.SocketException ||
+            e is java.net.SocketTimeoutException ||
+            e is java.net.UnknownHostException
+        if (isNetworkOrTransient) {
+            Log.w(TAG, "Transient network issue while validating session, preserving cached session: ${e.message}")
+            true
+        } else {
+            Log.w(TAG, "Session invalidated by Google Play: ${e.message}")
+            false
+        }
     }
 
     /** Clears the cached auth session so the next call to [getAuthData] fetches a fresh one. */

@@ -196,4 +196,225 @@ class UptodownParserTest {
         }
         assertTrue(result.exceptionOrNull() is SourceAppNotFoundException)
     }
+
+    @Test
+    fun resolveHistory_prefersAndFiltersApkOverXapk() = runBlocking {
+        val mixedVersionsJson = """
+            {
+              "data": [
+                {
+                  "fileID": 301,
+                  "version": "3.0.0",
+                  "kindFile": "XAPK",
+                  "versionURL": {
+                    "url": "$detailUrl",
+                    "extraURL": "download",
+                    "versionID": 301
+                  }
+                },
+                {
+                  "fileID": 302,
+                  "version": "3.0.0",
+                  "kindFile": "APK",
+                  "versionURL": {
+                    "url": "$detailUrl",
+                    "extraURL": "download",
+                    "versionID": 302
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val parser = UptodownParser(
+            testParserContext(
+                pages = mapOf(
+                    searchUrl to """<html><body><a href="$detailUrl">Example App</a></body></html>""",
+                    "$detailUrl/download" to downloadPageHtml,
+                    "$detailUrl/apps/12345/versions/1" to mixedVersionsJson
+                )
+            )
+        )
+
+        val candidates = parser.resolveHistory(
+            testRequest(packageName = packageName, requestedFileType = "APK", allowSplitArchive = false)
+        )
+
+        assertEquals(1, candidates.size)
+        assertEquals("3.0.0", candidates[0].versionName)
+        assertEquals("apk", candidates[0].fileKind)
+        assertTrue(candidates[0].formatMatches)
+        assertEquals("$detailUrl/download/302", candidates[0].url)
+    }
+
+    @Test
+    fun resolveRequested_prefersApkEntryOverXapk() = runBlocking {
+        val mixedVersionsJson = """
+            {
+              "data": [
+                {
+                  "fileID": 401,
+                  "version": "4.0.0",
+                  "kindFile": "XAPK",
+                  "versionURL": {
+                    "url": "$detailUrl",
+                    "extraURL": "download",
+                    "versionID": 401
+                  }
+                },
+                {
+                  "fileID": 402,
+                  "version": "4.0.0",
+                  "kindFile": "APK",
+                  "versionURL": {
+                    "url": "$detailUrl",
+                    "extraURL": "download",
+                    "versionID": 402
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val versionPage402Html = """
+            <html><body>
+              <div id="detail-app-name" data-code="12345">Example App</div>
+              <table>
+                <tr><th>Package Name</th><td>$packageName</td></tr>
+                <tr><th>File type</th><td>APK</td></tr>
+              </table>
+              <a id="detail-download-button" data-url="token-402">Download</a>
+            </body></html>
+        """.trimIndent()
+
+        val parser = UptodownParser(
+            testParserContext(
+                pages = mapOf(
+                    searchUrl to """<html><body><a href="$detailUrl">Example App</a></body></html>""",
+                    "$detailUrl/download" to downloadPageHtml,
+                    "$detailUrl/versions" to downloadPageHtml,
+                    "$detailUrl/apps/12345/versions/1" to mixedVersionsJson,
+                    "$detailUrl/download/402" to versionPage402Html
+                )
+            )
+        )
+
+        val candidates = parser.findCandidates(
+            testRequest(packageName = packageName, versionName = "4.0.0", requestedFileType = "APK", allowSplitArchive = false),
+            CandidateOption.REQUESTED
+        )
+
+        assertEquals(1, candidates.size)
+        val candidate = candidates.single()
+        assertEquals("4.0.0", candidate.versionName)
+        assertEquals("apk", candidate.fileKind)
+        assertTrue(candidate.formatMatches)
+        assertEquals("https://dw.uptodown.com/dwn/token-402", candidate.url)
+    }
+
+    @Test
+    fun findCandidates_prefersArm64OverArmeabiVariants() = runBlocking {
+        val downloadPageWithVariants = """
+            <html><body>
+              <div id="detail-app-name" data-code="12345">Example App</div>
+              <div class="detail"><div class="info"><div class="version">5.0.0</div></div></div>
+              <table><tr><th>Package Name</th><td>$packageName</td></tr></table>
+              <button class="button variants" data-version="500"></button>
+            </body></html>
+        """.trimIndent()
+
+        val variantContentHtml = """
+            <div class="content">
+              <div>arm64-v8a</div>
+              <div class="variant">
+                <div class="v-report" data-file-id="991"></div>
+                <div class="v-file"><span>APK</span></div>
+              </div>
+              <div>armeabi-v7a</div>
+              <div class="variant">
+                <div class="v-report" data-file-id="992"></div>
+                <div class="v-file"><span>APK</span></div>
+              </div>
+            </div>
+        """.trimIndent()
+
+        val variantResponseJson = """
+            {
+              "content": ${com.google.gson.Gson().toJson(variantContentHtml)}
+            }
+        """.trimIndent()
+
+        val parser = UptodownParser(
+            testParserContext(
+                pages = mapOf(
+                    searchUrl to """<html><body><a href="$detailUrl">Example App</a></body></html>""",
+                    "$detailUrl/download" to downloadPageWithVariants,
+                    "https://example-app.en.uptodown.com/app/12345/version/500/files" to variantResponseJson,
+                    "$detailUrl/download/991-x" to """<html><body><button id="detail-download-button"></button></body></html>"""
+                )
+            )
+        )
+
+        val request = testRequest(packageName = packageName).copy(
+            supportedAbis = listOf("arm64-v8a", "armeabi-v7a")
+        )
+        val candidates = parser.findCandidates(request, CandidateOption.LATEST)
+
+        assertEquals(1, candidates.size)
+        val candidate = candidates.single()
+        assertEquals("arm64-v8a", candidate.variantLabel)
+        assertEquals("$detailUrl/download/991-x", candidate.url)
+    }
+
+    @Test
+    fun findCandidates_usesCachedDirectUrlFromUptodownResolvedUrlCache() = runBlocking {
+        val downloadPageWithVariants = """
+            <html><body>
+              <div id="detail-app-name" data-code="12345">Example App</div>
+              <div class="detail"><div class="info"><div class="version">5.0.0</div></div></div>
+              <table><tr><th>Package Name</th><td>$packageName</td></tr></table>
+              <button class="button variants" data-version="500"></button>
+            </body></html>
+        """.trimIndent()
+
+        val variantContentHtml = """
+            <div class="content">
+              <div>arm64-v8a</div>
+              <div class="variant">
+                <div class="v-report" data-file-id="991"></div>
+                <div class="v-file"><span>APK</span></div>
+              </div>
+            </div>
+        """.trimIndent()
+
+        val variantResponseJson = """
+            {
+              "content": ${com.google.gson.Gson().toJson(variantContentHtml)}
+            }
+        """.trimIndent()
+
+        UptodownResolvedUrlCache.put("$detailUrl/download/991-x", "https://dw.uptodown.com/dwn/cached-cdn-991")
+
+        try {
+            val parser = UptodownParser(
+                testParserContext(
+                    pages = mapOf(
+                        searchUrl to """<html><body><a href="$detailUrl">Example App</a></body></html>""",
+                        "$detailUrl/download" to downloadPageWithVariants,
+                        "https://example-app.en.uptodown.com/app/12345/version/500/files" to variantResponseJson
+                    )
+                )
+            )
+
+            val candidates = parser.findCandidates(testRequest(packageName = packageName), CandidateOption.LATEST)
+
+            assertEquals(1, candidates.size)
+            val candidate = candidates.single()
+            assertTrue(candidate.directDownload)
+            assertEquals("https://dw.uptodown.com/dwn/cached-cdn-991", candidate.url)
+            assertEquals(null, candidate.captchaUrl)
+        } finally {
+            UptodownResolvedUrlCache.clear()
+        }
+    }
 }

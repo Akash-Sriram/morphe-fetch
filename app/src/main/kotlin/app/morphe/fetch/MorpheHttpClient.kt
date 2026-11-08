@@ -23,55 +23,11 @@ import java.util.concurrent.TimeUnit
  */
 internal object WebKitCookieJar : CookieJar {
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        val cookieManager = runCatching { CookieManager.getInstance() }.getOrNull() ?: return
-        val urlString = url.toString()
-        for (cookie in cookies) {
-            cookieManager.setCookie(urlString, cookie.toString())
-        }
-        runCatching { cookieManager.flush() }
+        CookieRepository.saveFromResponse(url, cookies)
     }
 
-    override fun loadForRequest(url: HttpUrl): List<Cookie> {
-        val cookieManager = runCatching { CookieManager.getInstance() }.getOrNull() ?: return emptyList()
-        val rawHeaders = buildList {
-            cookieManager.getCookie(url.toString())?.takeIf { it.isNotBlank() }?.let(::add)
-            val host = url.host.lowercase(Locale.US)
-            val baseDomains = listOf("apkmirror.com", "uptodown.com", "apkpure.com")
-            for (domain in baseDomains) {
-                if (host.endsWith(domain)) {
-                    cookieManager.getCookie("https://www.$domain/")?.takeIf { it.isNotBlank() }?.let(::add)
-                    cookieManager.getCookie("https://$domain/")?.takeIf { it.isNotBlank() }?.let(::add)
-                    if (domain == "uptodown.com") {
-                        cookieManager.getCookie("https://en.uptodown.com/")?.takeIf { it.isNotBlank() }?.let(::add)
-                    }
-                    break
-                }
-            }
-        }
-        if (rawHeaders.isEmpty()) return emptyList()
-
-        val parsedCookies = mutableMapOf<String, Cookie>()
-        for (header in rawHeaders) {
-            header.split(";").forEach { part ->
-                val trimmed = part.trim()
-                val eq = trimmed.indexOf('=')
-                if (eq > 0) {
-                    val name = trimmed.substring(0, eq).trim()
-                    val value = trimmed.substring(eq + 1).trim()
-                    runCatching {
-                        Cookie.Builder()
-                            .name(name)
-                            .value(value)
-                            .domain(url.host)
-                            .build()
-                    }.getOrNull()?.let { cookie ->
-                        parsedCookies[name] = cookie
-                    }
-                }
-            }
-        }
-        return parsedCookies.values.toList()
-    }
+    override fun loadForRequest(url: HttpUrl): List<Cookie> =
+        CookieRepository.loadForRequest(url)
 }
 
 internal fun sanitizeToChromeUserAgent(rawUa: String): String {
@@ -320,6 +276,12 @@ internal object MorpheHttpClient {
             .connectionPool(connectionPool)
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
+            .build()
+    }
+
+    val uptodownDownloadClient: OkHttpClient by lazy {
+        downloadClient.newBuilder()
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
             .build()
     }
 

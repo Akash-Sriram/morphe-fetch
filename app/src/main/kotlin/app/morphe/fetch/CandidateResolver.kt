@@ -19,9 +19,11 @@ internal class CandidateResolver(
         val manual = manualCandidates(request, effectiveDisabledSources)
         val enabled = DownloadSource.entries
             .filter { it !in effectiveDisabledSources }
-        val ordered = preferredSource
+        val hintSource = request.sourceHintUrls.firstNotNullOfOrNull(::morpheResolvedSource)
+        val prioritized = preferredSource ?: hintSource
+        val ordered = prioritized
             ?.takeIf { it in enabled }
-            ?.let { preferred -> listOf(preferred) + enabled.filterNot { it == preferred } }
+            ?.let { pref -> listOf(pref) + enabled.filterNot { it == pref } }
             ?: enabled
         return CandidateResult(
             sourceGroups = ordered.map { source ->
@@ -95,14 +97,18 @@ internal class CandidateResolver(
         }
 
         return buildList {
-            addAll(candidates.filter(request::isRequestedMatch))
+            val matching = candidates.filter(request::isRequestedMatch)
+            val formatMatching = matching.filter { it.formatMatches }
+            addAll(if (formatMatching.isNotEmpty()) formatMatching else matching)
             if (none { it.option == CandidateOption.REQUESTED }) {
                 parsers[source]?.requestedFallbackCandidate(request)?.let(::add)
             }
         }
             .distinctBy(DownloadCandidate::identityKey)
+            .preferRunnableArch(request.availableAbis)
             .sortedWith(
                 compareBy<DownloadCandidate> { it.sortIndex }
+                    .thenByDescending { it.formatMatches }
                     .thenBy { it.archPriority(request.availableAbis) }
             )
     }
@@ -114,20 +120,33 @@ internal class CandidateResolver(
         effectiveDisabledSources: Set<DownloadSource>
     ): List<DownloadCandidate> {
         return buildList {
-            addAll(
-                candidates
-                    .filter { it.option == CandidateOption.LATEST }
-                    .filter { request.requestsVariantBuild || !it.hasVariantBuildMarker }
-            )
+            val matching = candidates
+                .filter { it.option == CandidateOption.LATEST }
+                .filter { request.requestsVariantBuild || !it.hasVariantBuildMarker }
+            val formatMatching = matching.filter { it.formatMatches }
+            addAll(if (formatMatching.isNotEmpty()) formatMatching else matching)
             if (none { it.option == CandidateOption.LATEST }) {
                 parsers[source]?.latestFallbackCandidate(request)?.let(::add)
             }
         }
             .distinctBy(DownloadCandidate::identityKey)
+            .preferRunnableArch(request.availableAbis)
             .sortedWith(
                 compareBy<DownloadCandidate> { it.sortIndex }
+                    .thenByDescending { it.formatMatches }
                     .thenBy { it.archPriority(request.availableAbis) }
             )
+    }
+
+    private fun List<DownloadCandidate>.preferRunnableArch(
+        availableAbis: List<String>
+    ): List<DownloadCandidate> {
+        if (isEmpty() || availableAbis.isEmpty()) return this
+        val runnable = filter { it.archPriority(availableAbis) < ARCH_RANK_MISMATCH }
+        val pool = runnable.ifEmpty { this }
+        val bestRank = pool.minOfOrNull { it.archPriority(availableAbis) } ?: return this
+        val bestPool = pool.filter { it.archPriority(availableAbis) == bestRank }
+        return bestPool.ifEmpty { this }
     }
 
     fun sourceErrorFallbackCandidate(
@@ -236,8 +255,5 @@ internal class CandidateResolver(
             .sortedBy { it.first.ordinal }
 }
 
-private fun DownloadCandidate.archPriority(availableAbis: List<String>): Int {
-    val arch = variantLabel?.lowercase(Locale.US) ?: ""
-    val idx = availableAbis.indexOfFirst { it.equals(arch, ignoreCase = true) }
-    return if (idx >= 0) idx else if (arch.isUniversalArchLabel()) 10 else 999
-}
+private fun DownloadCandidate.archPriority(availableAbis: List<String>): Int =
+    archMatchRank(variantLabel, availableAbis)

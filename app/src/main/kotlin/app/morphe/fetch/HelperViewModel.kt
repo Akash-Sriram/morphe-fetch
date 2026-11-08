@@ -407,7 +407,8 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                         .filter { candidate ->
                             !candidate.directDownload &&
                                 candidate.formatMatches &&
-                                (currentReq.isRequestedMatch(candidate) || candidate.captchaUrl != null)
+                                (currentReq.isRequestedMatch(candidate) ||
+                                    (candidate.captchaUrl != null && currentReq.matchesKnownVersion(candidate.versionName, candidate.versionCode)))
                         }
                         .minByOrNull { candidate ->
                             val arch = candidate.variantLabel?.lowercase(Locale.US) ?: ""
@@ -418,18 +419,29 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                         appendLog("Auto-fetch: Attempting background verification for Uptodown (${indirectMatch.versionDisplay})...")
                         val context = getApplication<Application>()
                         val targetUrl = indirectMatch.captchaUrl ?: indirectMatch.url
-                        val resolvedUrl = UptodownHeadlessResolver.resolveDownloadUrl(context, targetUrl, timeoutMs = 9500L)
+                        val resolvedUrl = UptodownHeadlessResolver.resolveDownloadUrl(context, targetUrl, timeoutMs = 4000L)
                         if (resolvedUrl != null) {
+                            val cookieHeader = CookieRepository.getCookieHeader(resolvedUrl, targetUrl, DownloadSource.UPTODOWN)
+                            UptodownResolvedUrlCache.put(
+                                pageUrl = targetUrl,
+                                downloadUrl = resolvedUrl,
+                                cookieHeader = cookieHeader,
+                                referer = targetUrl,
+                                expectedSha256 = indirectMatch.files.firstOrNull()?.expectedSha256
+                            )
                             appendLog("Auto-fetch: Background verification passed! Starting download...")
                             directMatch = indirectMatch.copy(
                                 url = resolvedUrl,
                                 directDownload = true,
+                                captchaUrl = null,
+                                note = null,
                                 files = listOf(
                                     CandidateDownloadFile(
                                         url = resolvedUrl,
                                         fileName = capturedDownloadFileName(indirectMatch, resolvedUrl, indirectMatch.fileKind),
                                         referer = targetUrl,
-                                        cookieHeader = CookieManager.getInstance().getCookie(targetUrl)
+                                        cookieHeader = cookieHeader,
+                                        expectedSha256 = indirectMatch.files.firstOrNull()?.expectedSha256
                                     )
                                 )
                             )
@@ -657,38 +669,74 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
 
     fun openCaptchaBrowser(candidate: DownloadCandidate) {
         if (candidate.source == DownloadSource.UPTODOWN) {
-            viewModelScope.launch {
-                appendLog(
-                    "Uptodown: Attempting background verification for ${candidate.versionDisplay}...",
-                    LogLevel.Info
+            val targetUrl = candidate.captchaUrl ?: candidate.url
+            val cached = UptodownResolvedUrlCache.get(targetUrl)
+            if (cached != null) {
+                val directCandidate = candidate.copy(
+                    url = cached.downloadUrl,
+                    directDownload = true,
+                    captchaUrl = null,
+                    note = null,
+                    files = listOf(
+                        CandidateDownloadFile(
+                            url = cached.downloadUrl,
+                            fileName = capturedDownloadFileName(candidate, cached.downloadUrl, candidate.fileKind),
+                            referer = cached.referer ?: targetUrl,
+                            cookieHeader = cached.cookieHeader,
+                            expectedSha256 = cached.expectedSha256 ?: candidate.files.firstOrNull()?.expectedSha256
+                        )
+                    )
                 )
+                updateCandidateInResult(directCandidate)
+                appendLog("Using cached download link for Uptodown (${candidate.versionDisplay}). Starting download...")
+                downloadAndReturn(directCandidate)
+                return
+            }
+
+            appendLog("Attempting background verification for Uptodown (${candidate.versionDisplay})...")
+            viewModelScope.launch {
                 val context = getApplication<Application>()
-                val targetUrl = candidate.captchaUrl ?: candidate.url
-                val resolvedUrl = UptodownHeadlessResolver.resolveDownloadUrl(context, targetUrl, timeoutMs = 9500L)
+                val resolvedUrl = UptodownHeadlessResolver.resolveDownloadUrl(context, targetUrl, timeoutMs = 3500L)
                 if (resolvedUrl != null) {
+                    val cookieHeader = CookieRepository.getCookieHeader(resolvedUrl, targetUrl, DownloadSource.UPTODOWN)
+                    UptodownResolvedUrlCache.put(
+                        pageUrl = targetUrl,
+                        downloadUrl = resolvedUrl,
+                        cookieHeader = cookieHeader,
+                        referer = targetUrl,
+                        expectedSha256 = candidate.files.firstOrNull()?.expectedSha256
+                    )
+                    val directCandidate = candidate.copy(
+                        url = resolvedUrl,
+                        directDownload = true,
+                        captchaUrl = null,
+                        note = null,
+                        files = listOf(
+                            CandidateDownloadFile(
+                                url = resolvedUrl,
+                                fileName = capturedDownloadFileName(candidate, resolvedUrl, candidate.fileKind),
+                                referer = targetUrl,
+                                cookieHeader = cookieHeader,
+                                expectedSha256 = candidate.files.firstOrNull()?.expectedSha256
+                            )
+                        )
+                    )
+                    updateCandidateInResult(directCandidate)
+                    appendLog("Background verification passed! Starting download...")
+                    downloadAndReturn(directCandidate)
+                } else {
                     appendLog(
-                        "Uptodown: Background verification passed! Starting download...",
+                        "Verification required — opening in-app browser for ${candidate.source.label} (${candidate.versionDisplay}).",
                         LogLevel.Info
                     )
-                    val capture = BrowserDownloadCapture(
-                        downloadUrl = resolvedUrl,
-                        refererUrl = targetUrl,
-                        cookieHeader = CookieManager.getInstance().getCookie(targetUrl)
-                    )
-                    handleCapturedDownload(candidate, capture)
-                    return@launch
+                    captchaBrowser = candidate
                 }
-                appendLog(
-                    "Uptodown: Background verification inconclusive. Opening in-app browser.",
-                    LogLevel.Info
-                )
-                captchaBrowser = candidate
             }
             return
         }
 
         appendLog(
-            "Opening in-app browser for ${candidate.source.label} to solve the captcha.",
+            "Opening in-app browser for ${candidate.source.label} (${candidate.versionDisplay}) to solve captcha.",
             LogLevel.Info
         )
         captchaBrowser = candidate
@@ -712,28 +760,45 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             ?: candidate.captchaUrl
             ?: candidate.url
         val cookieHeader = capture.cookieHeader
-            ?: CookieManager.getInstance().getCookie(referer)
+            ?: CookieRepository.getCookieHeader(capture.downloadUrl, referer, candidate.source)
+        if (candidate.source == DownloadSource.UPTODOWN) {
+            val targetUrl = candidate.captchaUrl ?: candidate.url
+            UptodownResolvedUrlCache.put(
+                pageUrl = targetUrl,
+                downloadUrl = capture.downloadUrl,
+                cookieHeader = cookieHeader,
+                referer = referer,
+                expectedSha256 = candidate.files.firstOrNull()?.expectedSha256
+            )
+        }
+        val directCandidate = candidate.copy(
+            url = capture.downloadUrl,
+            fileKind = fileKind,
+            directDownload = true,
+            captchaUrl = null,
+            note = null,
+            files = listOf(
+                CandidateDownloadFile(
+                    url = capture.downloadUrl,
+                    fileName = capturedDownloadFileName(candidate, capture.downloadUrl, fileKind),
+                    referer = referer,
+                    cookieHeader = cookieHeader,
+                    expectedSha256 = candidate.files.firstOrNull()?.expectedSha256
+                )
+            )
+        )
+        updateCandidateInResult(directCandidate)
         appendLog(
             "Captured download link from ${candidate.source.label} " +
                 "($fileKind): ${capture.downloadUrl}",
             LogLevel.Info
         )
-        downloadAndReturn(
-            candidate.copy(
-                url = capture.downloadUrl,
-                fileKind = fileKind,
-                directDownload = true,
-                note = null,
-                files = listOf(
-                    CandidateDownloadFile(
-                        url = capture.downloadUrl,
-                        fileName = capturedDownloadFileName(candidate, capture.downloadUrl, fileKind),
-                        referer = referer,
-                        cookieHeader = cookieHeader
-                    )
-                )
-            )
-        )
+        downloadAndReturn(directCandidate)
+    }
+
+    private fun updateCandidateInResult(candidate: DownloadCandidate) {
+        val ready = uiState as? UiState.Ready ?: return
+        uiState = UiState.Ready(ready.result.withUpdatedCandidate(candidate))
     }
 
     private fun handleDownloadEvent(event: DownloadJobManager.Event?) {
@@ -772,9 +837,15 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                     event.message.contains("cloudflare", ignoreCase = true) ||
                     event.message.contains("captcha", ignoreCase = true) ||
                     event.message.contains("bot protection", ignoreCase = true)
+                val isUptodownExpiredOrForbidden = candidate?.source == DownloadSource.UPTODOWN && (
+                    event.message.contains("403") ||
+                    event.message.contains("410") ||
+                    event.message.contains("forbidden", ignoreCase = true) ||
+                    event.message.contains("expired", ignoreCase = true)
+                )
 
-                if (isHtmlOrChallenge && candidate != null) {
-                    appendLog("${candidate.source.label} requires browser verification. Opening in-app browser...", LogLevel.Warning)
+                if ((isHtmlOrChallenge || isUptodownExpiredOrForbidden) && candidate != null) {
+                    appendLog("${candidate.source.label} requires browser verification / token refresh. Opening in-app browser...", LogLevel.Warning)
                     openCaptchaBrowser(candidate)
                 } else {
                     val message = event.message.withManualModeHint()
@@ -807,13 +878,11 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             putExtra(DownloadHelperContract.EXTRA_RESULT_SOURCE_NAME, pending.sourceName)
             putExtra(DownloadHelperContract.EXTRA_RESULT_FILE_NAME, pending.fileName)
         }
-        DownloadJobManager.clearPendingResult(context)
         cancelCompletionNotification()
         _finishEvents.trySend(resultIntent)
     }
 
     fun deliverPendingResultIfPresent(activity: Activity): Boolean {
-        if (activity.callingActivity == null) return false
         val activeRequest = request ?: return false
         val context = getApplication<Application>()
         val pending = DownloadJobManager.readPendingResult(context) ?: return false
@@ -823,23 +892,7 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             return false
         }
 
-        val shareableUri = Uri.parse(pending.uri)
-        val result = Intent().apply {
-            data = shareableUri
-            clipData = ClipData.newUri(activity.contentResolver, pending.fileName, shareableUri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            putExtra(DownloadHelperContract.EXTRA_RESULT_PACKAGE_NAME, pending.packageName)
-            putExtra(DownloadHelperContract.EXTRA_RESULT_VERSION_NAME, pending.versionName)
-            putExtra(DownloadHelperContract.EXTRA_RESULT_SOURCE_NAME, pending.sourceName)
-            putExtra(DownloadHelperContract.EXTRA_RESULT_FILE_NAME, pending.fileName)
-        }
-        val caller = activeRequest.callerPackage.takeIf { it.isNotBlank() } ?: "app.morphe.manager"
-        activity.grantUriPermission(caller, shareableUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        activity.setResult(Activity.RESULT_OK, result)
-        appendLog("Delivered existing result for ${pending.packageName}.")
-        DownloadJobManager.clearPendingResult(context)
-        cancelCompletionNotification()
-        activity.finish()
+        deliverPendingResult(pending)
         return true
     }
 

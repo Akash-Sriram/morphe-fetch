@@ -15,3 +15,5 @@ revanced-manager-downloaders/
 .DS_Store
 .android/
 scripts/processed_archive*.json
+processed_archive*.json
+.kotlin/

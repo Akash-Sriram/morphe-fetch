@@ -4,8 +4,10 @@ import android.annotation.SuppressLint
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -70,8 +72,8 @@ internal fun CaptchaBrowserScreen(
                         trimmed
                     }
                     val referer = webViewRef?.url ?: webViewRef?.originalUrl ?: candidate.captchaUrl ?: candidate.url
-                    CookieManager.getInstance().flush()
-                    val cookies = extractCombinedCookies(url, referer)
+                    CookieRepository.flush()
+                    val cookies = CookieRepository.getCookieHeader(url, referer, candidate.source)
                     onDownloadCaptured(
                         BrowserDownloadCapture(
                             downloadUrl = url,
@@ -106,6 +108,21 @@ internal fun CaptchaBrowserScreen(
                 }
             }
             webViewClient = object : WebViewClient() {
+                override fun onRenderProcessGone(
+                    view: WebView?,
+                    detail: RenderProcessGoneDetail?
+                ): Boolean {
+                    android.util.Log.w("CaptchaBrowser", "WebView render process gone (didCrash=${detail?.didCrash()})")
+                    runCatching {
+                        (view?.parent as? ViewGroup)?.removeView(view)
+                        view?.stopLoading()
+                        view?.destroy()
+                    }
+                    webViewRef = null
+                    autoPilotStatus = "Browser process closed unexpectedly. Please close and try again."
+                    return true
+                }
+
                 override fun shouldOverrideUrlLoading(
                     view: WebView?,
                     request: WebResourceRequest?
@@ -117,8 +134,8 @@ internal fun CaptchaBrowserScreen(
                     val url = uri.toString()
                     if (url.looksLikeApkDownload()) {
                         val referer = view?.url ?: view?.originalUrl ?: candidate.captchaUrl ?: candidate.url
-                        CookieManager.getInstance().flush()
-                        val cookies = extractCombinedCookies(url, referer)
+                        CookieRepository.flush()
+                        val cookies = CookieRepository.getCookieHeader(url, referer, candidate.source)
                         onDownloadCaptured(
                             BrowserDownloadCapture(
                                 downloadUrl = url,
@@ -149,7 +166,7 @@ internal fun CaptchaBrowserScreen(
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    CookieManager.getInstance().flush()
+                    CookieRepository.flush()
                     view?.evaluateJavascript(WebViewAdBlocker.INJECT_CSS_JS, null)
                     view?.evaluateJavascript(CAPTCHA_CAPTURE_JS, null)
                     val preferredAbi = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
@@ -169,8 +186,8 @@ internal fun CaptchaBrowserScreen(
             }
             setDownloadListener { url, _, _, _, _ ->
                 val referer = this.url ?: this.originalUrl ?: candidate.captchaUrl ?: candidate.url
-                CookieManager.getInstance().flush()
-                val cookies = extractCombinedCookies(url, referer)
+                CookieRepository.flush()
+                val cookies = CookieRepository.getCookieHeader(url, referer, candidate.source)
                 onDownloadCaptured(
                     BrowserDownloadCapture(
                         downloadUrl = url,
@@ -341,6 +358,32 @@ private const val CAPTCHA_CAPTURE_JS = """
     if (u && looksLike(u)) { window.Android && window.Android.capture(u); return null; }
     return origOpen ? origOpen.apply(window, arguments) : null;
   };
+
+  function clickReject(doc) {
+    try {
+      var els = doc.querySelectorAll('button, a, [role=button], [role=link]');
+      for (var i = 0; i < els.length; i++) {
+        var e = els[i];
+        var t = (e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        if (!t || t.length > 40) continue;
+        if (t === 'reject all' || t === 'reject' || t === 'decline' || t === 'refuse'
+            || t === 'only necessary' || t === 'necessary only'
+            || t.indexOf('reject all') >= 0 || t.indexOf('only necessary') >= 0) {
+          e.click();
+          return true;
+        }
+      }
+      var fs = doc.querySelectorAll('iframe');
+      for (var j = 0; j < fs.length; j++) {
+        try {
+          if (fs[j].contentDocument && clickReject(fs[j].contentDocument)) return true;
+        } catch (err) {}
+      }
+    } catch (err) {}
+    return false;
+  }
+  clickReject(document);
+  setInterval(function () { clickReject(document); }, 1000);
 })();
 """
 
@@ -366,44 +409,6 @@ internal fun String.looksLikeApkDownload(): Boolean {
         lower.contains("apkcombo.app")
 }
 
-private fun extractCombinedCookies(url: String, referer: String?): String? {
-    val cm = runCatching { CookieManager.getInstance() }.getOrNull() ?: return null
-    val cookies = buildList {
-        cm.getCookie(url)?.takeIf { it.isNotBlank() }?.let(::add)
-        referer?.takeIf { it.isNotBlank() }?.let { ref ->
-            cm.getCookie(ref)?.takeIf { it.isNotBlank() }?.let(::add)
-        }
-        val combined = "$url $referer"
-        if (combined.contains("apkmirror.com", ignoreCase = true)) {
-            cm.getCookie("https://www.apkmirror.com/")?.takeIf { it.isNotBlank() }?.let(::add)
-            cm.getCookie("https://apkmirror.com/")?.takeIf { it.isNotBlank() }?.let(::add)
-        }
-        if (combined.contains("uptodown.com", ignoreCase = true)) {
-            cm.getCookie("https://en.uptodown.com/")?.takeIf { it.isNotBlank() }?.let(::add)
-            cm.getCookie("https://uptodown.com/")?.takeIf { it.isNotBlank() }?.let(::add)
-        }
-        if (combined.contains("apkcombo.com", ignoreCase = true)) {
-            cm.getCookie("https://apkcombo.com/")?.takeIf { it.isNotBlank() }?.let(::add)
-        }
-        if (combined.contains("apkpure.com", ignoreCase = true)) {
-            cm.getCookie("https://apkpure.com/")?.takeIf { it.isNotBlank() }?.let(::add)
-        }
-    }
-    if (cookies.isEmpty()) return null
-    val map = mutableMapOf<String, String>()
-    cookies.forEach { header ->
-        header.split(";").forEach { part ->
-            val trimmed = part.trim()
-            val eq = trimmed.indexOf('=')
-            if (eq > 0) {
-                val key = trimmed.substring(0, eq).trim()
-                val value = trimmed.substring(eq + 1).trim()
-                map[key] = value
-            }
-        }
-    }
-    return map.entries.joinToString("; ") { "${it.key}=${it.value}" }
-}
 
 private fun buildAutoPilotJs(targetVersion: String, preferredAbi: String): String {
     val escapedVer = targetVersion.replace("\"", "\\\"")
@@ -490,24 +495,27 @@ private fun buildAutoPilotJs(targetVersion: String, preferredAbi: String): Strin
       }
 
       // Step 1: Search results page -> click matching release row
-      var releaseLinks = document.querySelectorAll('a[href*="-release/"]');
+      var mainContainer = document.querySelector('#content, div[id*="primary"], .listWidget') || document;
+      var releaseLinks = mainContainer.querySelectorAll('a[href*="-release/"]');
       if (releaseLinks && releaseLinks.length > 0) {
         var chosenLink = null;
         for (var k = 0; k < releaseLinks.length; k++) {
           var rLink = releaseLinks[k];
           if (rLink.href.indexOf('#') !== -1) continue;
+          if (rLink.closest && rLink.closest('#sidebar, .sidebar, .widget, .popular-apps')) continue;
           var linkText = (rLink.textContent || '') + ' ' + (rLink.href || '');
           if (targetVer && (linkText.indexOf(targetVer) !== -1 || linkText.indexOf(targetVer.replace(/\./g, '-')) !== -1)) {
             chosenLink = rLink;
             break;
           }
         }
-        if (!chosenLink && releaseLinks.length > 0) {
+        if (!chosenLink && !targetVer && releaseLinks.length > 0) {
           for (var m = 0; m < releaseLinks.length; m++) {
-            if (releaseLinks[m].href.indexOf('#') === -1) {
-              chosenLink = releaseLinks[m];
-              break;
-            }
+            var rLink = releaseLinks[m];
+            if (rLink.href.indexOf('#') !== -1) continue;
+            if (rLink.closest && rLink.closest('#sidebar, .sidebar, .widget, .popular-apps')) continue;
+            chosenLink = rLink;
+            break;
           }
         }
         if (chosenLink && !chosenLink.getAttribute('data-autopilot-clicked')) {
@@ -574,7 +582,33 @@ private fun buildUptodownAutoPilotJs(preferredAbi: String): String {
     }
 
     // 3. Poll for the REAL direct download button (ignoring Uptodown store installer)
+    function clickReject(doc) {
+      try {
+        var els = doc.querySelectorAll('button, a, [role=button], [role=link]');
+        for (var i = 0; i < els.length; i++) {
+          var e = els[i];
+          var t = (e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          if (!t || t.length > 40) continue;
+          if (t === 'reject all' || t === 'reject' || t === 'decline' || t === 'refuse'
+              || t === 'only necessary' || t === 'necessary only'
+              || t.indexOf('reject all') >= 0 || t.indexOf('only necessary') >= 0) {
+            e.click();
+            return true;
+          }
+        }
+        var fs = doc.querySelectorAll('iframe');
+        for (var j = 0; j < fs.length; j++) {
+          try {
+            if (fs[j].contentDocument && clickReject(fs[j].contentDocument)) return true;
+          } catch (err) {}
+        }
+      } catch (err) {}
+      return false;
+    }
+    clickReject(document);
+
     function checkDownload() {
+      clickReject(document);
       var btn = document.querySelector('#detail-download-button, a.button.download[data-url], button#detail-download-button');
       if (btn) {
         var dataUrl = btn.getAttribute('data-url');

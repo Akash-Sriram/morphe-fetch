@@ -4,8 +4,10 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -44,7 +46,16 @@ internal object UptodownHeadlessResolver {
                     fun finish(url: String?) {
                         if (isDone.compareAndSet(false, true)) {
                             resolvedUrl = url
-                            runCatching { CookieManager.getInstance().flush() }
+                            if (url != null) {
+                                val cookies = CookieRepository.getCookieHeader(url, pageUrl, DownloadSource.UPTODOWN)
+                                UptodownResolvedUrlCache.put(
+                                    pageUrl = pageUrl,
+                                    downloadUrl = url,
+                                    cookieHeader = cookies,
+                                    referer = pageUrl
+                                )
+                            }
+                            CookieRepository.flush()
                             if (cont.isActive) cont.resumeWith(Result.success(url))
                             runCatching {
                                 webView?.stopLoading()
@@ -78,6 +89,7 @@ internal object UptodownHeadlessResolver {
 
                     val view = WebView(context.applicationContext)
                     webView = view
+                    view.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                     view.layout(0, 0, 1080, 1920)
                     view.settings.apply {
                         userAgentString = MorpheHttpClient.browserUserAgent
@@ -101,6 +113,20 @@ internal object UptodownHeadlessResolver {
                     }
 
                     view.webViewClient = object : WebViewClient() {
+                        override fun onRenderProcessGone(
+                            v: WebView?,
+                            detail: RenderProcessGoneDetail?
+                        ): Boolean {
+                            Log.w(TAG, "Headless WebView render process gone (didCrash=${detail?.didCrash()})")
+                            runCatching {
+                                v?.stopLoading()
+                                v?.destroy()
+                            }
+                            webView = null
+                            finish(null)
+                            return true
+                        }
+
                         override fun onPageStarted(v: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                             super.onPageStarted(v, url, favicon)
                             v?.evaluateJavascript(
@@ -134,7 +160,7 @@ internal object UptodownHeadlessResolver {
 
                         override fun onPageFinished(v: WebView?, url: String?) {
                             super.onPageFinished(v, url)
-                            cm.flush()
+                            CookieRepository.flush()
                             v?.evaluateJavascript(HEADLESS_POLL_JS, null)
                         }
                     }
@@ -143,7 +169,7 @@ internal object UptodownHeadlessResolver {
                     val pollRunnable = object : Runnable {
                         override fun run() {
                             if (isDone.get()) return
-                            cm.flush()
+                            CookieRepository.flush()
                             view.evaluateJavascript(HEADLESS_POLL_JS, null)
                             pollHandler.postDelayed(this, 600)
                         }
@@ -172,6 +198,31 @@ internal object UptodownHeadlessResolver {
       Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
     } catch(e) {}
 
+    function clickReject(doc) {
+      try {
+        var els = doc.querySelectorAll('button, a, [role=button], [role=link]');
+        for (var i = 0; i < els.length; i++) {
+          var e = els[i];
+          var t = (e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          if (!t || t.length > 40) continue;
+          if (t === 'reject all' || t === 'reject' || t === 'decline' || t === 'refuse'
+              || t === 'only necessary' || t === 'necessary only'
+              || t.indexOf('reject all') >= 0 || t.indexOf('only necessary') >= 0) {
+            e.click();
+            return true;
+          }
+        }
+        var fs = doc.querySelectorAll('iframe');
+        for (var j = 0; j < fs.length; j++) {
+          try {
+            if (fs[j].contentDocument && clickReject(fs[j].contentDocument)) return true;
+          } catch (err) {}
+        }
+      } catch (err) {}
+      return false;
+    }
+    clickReject(document);
+
     var variantRows = document.querySelectorAll('.content .variant, div.variant');
     if (variantRows && variantRows.length > 0) {
       var target = variantRows[0].querySelector('a[href], .v-report');
@@ -197,8 +248,6 @@ internal object UptodownHeadlessResolver {
         window._turnstileTriggered = true;
         try { window.onDownloadTurnstileAPILoaded(); } catch(e) {}
       }
-
-      btn.click();
     }
   } catch(e) {}
 })();

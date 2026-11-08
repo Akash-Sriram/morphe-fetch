@@ -29,6 +29,7 @@ internal sealed interface MatchReason {
     data class SourceRepo(val repo: String) : MatchReason
     data class Patch(val patchName: String) : MatchReason
     data class Description(val patchName: String, val snippet: String) : MatchReason
+    data class Category(val category: String) : MatchReason
 }
 
 @Immutable
@@ -56,6 +57,10 @@ internal data class MorpheArchiveIndex(
 internal data class ArchiveApp(
     @SerializedName("packageName") val packageName: String = "",
     @SerializedName("name") val name: String = "",
+    @SerializedName("category") val category: String? = null,
+    @SerializedName("isFeatured") val isFeatured: Boolean = false,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("installs") val installs: Long? = null,
     @SerializedName("patches") val patches: List<String> = emptyList(),
     @SerializedName("patchDetails") val patchDetails: List<ArchivePatch> = emptyList(),
     @SerializedName("features") val features: List<ArchiveFeature> = emptyList(),
@@ -117,9 +122,11 @@ internal data class ArchiveApp(
             patchNamesLower = patches.map { it.lowercase(Locale.US) }
             val detailsNames = patchDetails.map { it.name.lowercase(Locale.US) }
             val detailsDesc = patchDetails.mapNotNull { it.description?.lowercase(Locale.US) }
+            val catLower = category?.lowercase(Locale.US)?.replace('_', ' ')
             searchBlob = buildString {
                 append(nameLower).append(' ')
                 append(packageLower).append(' ')
+                catLower?.let { append(it).append(' ') }
                 sourceReposLower.forEach { append(it).append(' ') }
                 patchNamesLower.forEach { append(it).append(' ') }
                 detailsNames.forEach { append(it).append(' ') }
@@ -151,6 +158,7 @@ internal data class ArchiveApp(
             nameLower.contains(queryLower) -> 600
             packageLower.contains(queryLower) -> 400
             sourceReposLower.any { it.contains(queryLower) } -> 300
+            category?.lowercase(Locale.US)?.replace('_', ' ')?.contains(queryLower) == true -> 250
             patchNamesLower.any { it.contains(queryLower) } -> 200
             else -> 100
         }
@@ -174,14 +182,20 @@ internal data class ArchiveApp(
             return MatchReason.SourceRepo(matchedSource.repo)
         }
 
-        // 2. Patch name match
+        // 2. Category match
+        val catClean = category?.replace('_', ' ')
+        if (catClean != null && catClean.lowercase(Locale.US).contains(q)) {
+            return MatchReason.Category(catClean)
+        }
+
+        // 3. Patch name match
         val matchedPatch = patches.firstOrNull { it.lowercase(Locale.US).contains(q) }
             ?: patchDetails.firstOrNull { it.name.lowercase(Locale.US).contains(q) }?.name
         if (matchedPatch != null) {
             return MatchReason.Patch(matchedPatch)
         }
 
-        // 3. Patch description match
+        // 4. Patch description match
         val matchedDetail = patchDetails.firstOrNull {
             it.description?.lowercase(Locale.US)?.contains(q) == true
         }
@@ -225,6 +239,9 @@ internal data class ArchiveSource(
     @SerializedName("repo") val repo: String = "",
     @SerializedName("host") val host: String? = null,
     @SerializedName("avatarUrl") val avatarUrl: String? = null,
+    @SerializedName("bundleIconUrl") val bundleIconUrl: String? = null,
+    @SerializedName("stars") val stars: Int = 0,
+    @SerializedName("hotRank") val hotRank: Int = 9999,
     @SerializedName("patchCount") val patchCount: Int = 0,
     @SerializedName("exclusivePatchCount") val exclusivePatchCount: Int = 0,
     @SerializedName("exclusivePatches") val exclusivePatches: List<String> = emptyList(),
@@ -232,6 +249,8 @@ internal data class ArchiveSource(
     @SerializedName("appCount") val appCount: Int = 0,
     @SerializedName("webUrl") val webUrl: String? = null,
     @SerializedName("addUrl") val addUrl: String? = null,
+    @SerializedName("source") val source: String? = null,
+    @SerializedName("changelogUrl") val changelogUrl: String? = null,
     @SerializedName("patches") val patches: List<ArchivePatch> = emptyList(),
     @SerializedName("apps") val apps: List<ArchiveSourceApp> = emptyList(),
     /** The repo's latest release, used to rank otherwise identical sources. */
@@ -483,17 +502,26 @@ internal object MorpheArchive {
 
     fun loadFromDisk(context: Context): MorpheArchiveIndex? {
         return runCatching {
+            val bundledBody = context.assets.open("morphe_archive_bundled.json").bufferedReader().use { it.readText() }
+            val bundledParsed = runCatching { gson.fromJson(bundledBody, MorpheArchiveData::class.java) }.getOrNull()
+
             val file = File(context.filesDir, CACHE_FILE_NAME)
             val body = if (file.exists() && file.length() > 0L) {
-                val cached = file.readText()
-                if (cached.contains("\"features\"")) {
-                    cached
+                val cachedText = file.readText()
+                val cachedParsed = runCatching { gson.fromJson(cachedText, MorpheArchiveData::class.java) }.getOrNull()
+                val cachedCount = cachedParsed?.apps?.size ?: 0
+                val bundledCount = bundledParsed?.apps?.size ?: 0
+                val cachedTime = parseArchiveTimestamp(cachedParsed?.generatedAt) ?: 0L
+                val bundledTime = parseArchiveTimestamp(bundledParsed?.generatedAt) ?: 0L
+
+                if (cachedParsed != null && cachedCount >= bundledCount && cachedTime >= bundledTime) {
+                    cachedText
                 } else {
-                    // Cache is old raw upstream cache, read bundled processed asset instead
-                    context.assets.open("morphe_archive_bundled.json").bufferedReader().use { it.readText() }
+                    // Cache is smaller or older than bundled asset, use bundled asset
+                    bundledBody
                 }
             } else {
-                context.assets.open("morphe_archive_bundled.json").bufferedReader().use { it.readText() }
+                bundledBody
             }
             val parsed = gson.fromJson(body, MorpheArchiveData::class.java) ?: return null
             parsed.apps.forEach { it.ensureSearchIndex() }
@@ -574,15 +602,41 @@ internal object MorpheArchive {
         val parsed = gson.fromJson(body, MorpheArchiveData::class.java)
         parsed.apps.forEach { it.ensureSearchIndex() }
         parsed.repos.forEach { it.ensureSearchIndex() }
-        val index = MorpheArchiveIndex(
-            generatedAt = parsed.generatedAt,
-            apps = parsed.apps,
-            universalSources = parsed.universalSources,
-            repos = parsed.repos
+
+        val current = cachedIndex
+        val currentAppCount = current?.apps?.size ?: 0
+        val currentTimestamp = parseArchiveTimestamp(current?.generatedAt) ?: 0L
+        val remoteTimestamp = parseArchiveTimestamp(parsed.generatedAt) ?: 0L
+
+        // Quality & freshness guard: never downgrade to a remote feed that is older
+        // or has significantly fewer apps than our current/bundled catalog.
+        val isDowngrade = current != null && (
+            (parsed.apps.size < currentAppCount && remoteTimestamp <= currentTimestamp) ||
+            (remoteTimestamp > 0L && currentTimestamp > 0L && remoteTimestamp < currentTimestamp)
         )
-        cachedIndex = index
-        _indexState.value = index
-        index
+
+        val finalIndex = if (isDowngrade && current != null) {
+            Log.i(
+                TAG,
+                "Fetched remote index is older or smaller (${parsed.apps.size} apps, $remoteTimestamp) " +
+                    "than current index ($currentAppCount apps, $currentTimestamp). Retaining current index."
+            )
+            current
+        } else {
+            if (context != null) {
+                saveToDisk(context, body)
+            }
+            val index = MorpheArchiveIndex(
+                generatedAt = parsed.generatedAt,
+                apps = parsed.apps,
+                universalSources = parsed.universalSources,
+                repos = parsed.repos
+            )
+            cachedIndex = index
+            _indexState.value = index
+            index
+        }
+        finalIndex
     }
 
     /**

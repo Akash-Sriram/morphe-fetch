@@ -566,6 +566,7 @@ internal fun EmptyLaunchState(
                                             if (matchReason != null) {
                                                 val badgeText = when (matchReason) {
                                                     is MatchReason.SourceRepo -> "Source: ${matchReason.repo}"
+                                                    is MatchReason.Category -> "Category: ${matchReason.category}"
                                                     is MatchReason.Patch -> "Patch: ${matchReason.patchName}"
                                                     is MatchReason.Description -> "Patch: ${matchReason.patchName}"
                                                 }

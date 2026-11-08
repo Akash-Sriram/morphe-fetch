@@ -4,7 +4,9 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.View
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -17,11 +19,8 @@ internal object ApkMirrorSessionWarmer {
     private const val TARGET_URL = "https://www.apkmirror.com/"
     private val isWarming = AtomicBoolean(false)
 
-    fun hasValidCfClearance(): Boolean {
-        val cm = runCatching { CookieManager.getInstance() }.getOrNull() ?: return false
-        val cookies = cm.getCookie(TARGET_URL).orEmpty()
-        return cookies.contains("cf_clearance=")
-    }
+    fun hasValidCfClearance(): Boolean =
+        CookieRepository.hasClearance(DownloadSource.APK_MIRROR)
 
     fun warmSessionSync(context: Context, timeoutSeconds: Long = 15): Boolean {
         if (hasValidCfClearance()) {
@@ -65,6 +64,7 @@ internal object ApkMirrorSessionWarmer {
 
             try {
                 webView = WebView(context.applicationContext).apply {
+                    setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                     layout(0, 0, 1080, 1920)
                     settings.userAgentString = MorpheHttpClient.browserUserAgent
                     settings.javaScriptEnabled = true
@@ -90,6 +90,20 @@ internal object ApkMirrorSessionWarmer {
                     }
 
                     webViewClient = object : WebViewClient() {
+                        override fun onRenderProcessGone(
+                            v: WebView?,
+                            detail: RenderProcessGoneDetail?
+                        ): Boolean {
+                            Log.w(TAG, "ApkMirror warmer render process gone (didCrash=${detail?.didCrash()})")
+                            runCatching {
+                                v?.stopLoading()
+                                v?.destroy()
+                            }
+                            webView = null
+                            finish(false)
+                            return true
+                        }
+
                         override fun onPageStarted(v: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                             super.onPageStarted(v, url, favicon)
                             v?.evaluateJavascript(

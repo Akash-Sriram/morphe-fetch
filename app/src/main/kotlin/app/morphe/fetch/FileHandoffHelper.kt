@@ -55,10 +55,7 @@ internal object FileHandoffHelper {
         DownloadJobManager.persistPendingResult(pending, context)
         AppIconResolver.cacheFromApkFile(context, candidate.packageName, file)
         context.recordHandOff(request, candidate, file, uri)
-        if (
-            settings.downloadLocation == DownloadLocation.DOWNLOADS ||
-            settings.deleteTemporaryAfterHandoff
-        ) {
+        if (settings.downloadLocation == DownloadLocation.DOWNLOADS) {
             context.scheduleTemporaryDelete(file)
         }
         return pending

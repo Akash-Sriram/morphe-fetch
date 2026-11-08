@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.SortByAlpha
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -38,7 +39,8 @@ internal enum class AppStatusFilter(
 ) {
     Installed("Installed", Icons.Outlined.CheckCircle),
     NotInstalled("Not installed", Icons.Outlined.Block),
-    Favourites("Liked", Icons.Outlined.FavoriteBorder)
+    Favourites("Liked", Icons.Outlined.FavoriteBorder),
+    Featured("Featured", Icons.Outlined.Star)
 }
 
 /** How the archive list is ordered. */

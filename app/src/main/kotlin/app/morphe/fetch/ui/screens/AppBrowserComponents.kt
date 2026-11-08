@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.DropdownMenu
@@ -426,6 +427,18 @@ internal fun StatusFilterDropdown(
 }
 
 @Composable
+internal fun formatCategoryName(category: String?): String? {
+    if (category.isNullOrBlank()) return null
+    return category
+        .replace('_', ' ')
+        .lowercase(Locale.US)
+        .split(' ')
+        .joinToString(" ") { word ->
+            word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+        }
+}
+
+@Composable
 internal fun AppBrowserRow(
     app: ArchiveApp,
     favourite: Boolean,
@@ -478,6 +491,13 @@ internal fun AppBrowserRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (app.isFeatured) {
+                        MorpheStatusBadge(
+                            text = "Featured",
+                            icon = Icons.Outlined.Star,
+                            tone = SemanticTone.Warning
+                        )
+                    }
                     if (installed) {
                         MorpheStatusBadge(
                             text = "Installed",
@@ -517,6 +537,13 @@ internal fun AppBrowserRow(
                                     tone = SemanticTone.Warning
                                 )
                             }
+                            is MatchReason.Category -> {
+                                MorpheStatusBadge(
+                                    text = "Category: ${matchReason.category}",
+                                    icon = Icons.Outlined.Storefront,
+                                    tone = SemanticTone.Neutral
+                                )
+                            }
                             is MatchReason.Description -> {
                                 MorpheStatusBadge(
                                     text = "Patch: ${matchReason.patchName}",
@@ -537,6 +564,13 @@ internal fun AppBrowserRow(
                         icon = Icons.Outlined.Dns,
                         tone = SemanticTone.Primary
                     )
+                    formatCategoryName(app.category)?.let { catName ->
+                        MorpheStatusBadge(
+                            text = catName,
+                            icon = Icons.Outlined.Storefront,
+                            tone = SemanticTone.Neutral
+                        )
+                    }
                     app.formattedReleaseDate?.let { released ->
                         Text(
                             text = "Updated $released",
@@ -645,7 +679,9 @@ internal fun AppDetailView(
         }
     }
     val sortedSources = remember(app.sources) {
-        app.sources.sortedByDescending { it.latestChanges?.date.orEmpty() }
+        app.sources
+            .filter { it.patches.isNotEmpty() || it.patchCount > 0 }
+            .sortedByDescending { it.latestChanges?.date.orEmpty() }
     }
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
@@ -692,8 +728,35 @@ internal fun AppDetailView(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        if (app.isFeatured) {
+                            MorpheStatusBadge(
+                                text = "Featured",
+                                icon = Icons.Outlined.Star,
+                                tone = SemanticTone.Warning
+                            )
+                        }
+                        formatCategoryName(app.category)?.let { catName ->
+                            MorpheStatusBadge(
+                                text = catName,
+                                icon = Icons.Outlined.Storefront,
+                                tone = SemanticTone.Neutral
+                            )
+                        }
+                        app.installs?.takeIf { it > 0 }?.let { count ->
+                            val formattedInstalls = when {
+                                count >= 1_000_000_000 -> "${count / 1_000_000_000}B+ installs"
+                                count >= 1_000_000 -> "${count / 1_000_000}M+ installs"
+                                count >= 1_000 -> "${count / 1_000}K+ installs"
+                                else -> "$count installs"
+                            }
+                            MorpheStatusBadge(
+                                text = formattedInstalls,
+                                icon = Icons.Outlined.Download,
+                                tone = SemanticTone.Neutral
+                            )
+                        }
                         MorpheStatusBadge(
-                            text = "${app.sourceCount} " + if (app.sourceCount == 1) "source" else "sources",
+                            text = "${sortedSources.size} " + if (sortedSources.size == 1) "source" else "sources",
                             icon = Icons.Outlined.Extension,
                             tone = SemanticTone.Primary
                         )
@@ -721,6 +784,21 @@ internal fun AppDetailView(
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
+                }
+            }
+        }
+        app.description?.takeIf { it.isNotBlank() }?.let { desc ->
+            item {
+                MorpheSectionTitle(text = "About", icon = Icons.Outlined.Info)
+            }
+            item {
+                SectionCard {
+                    Text(
+                        text = desc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(MorpheDefaults.ContentPadding)
+                    )
                 }
             }
         }
@@ -752,16 +830,9 @@ internal fun AppDetailView(
                 MorpheSectionTitle(text = "Sources (${sortedSources.size})", icon = Icons.Outlined.Extension)
             }
             items(sortedSources, key = { it.repo }) { source ->
-                val autoExpand = remember(source.repo, searchQuery) {
-                    if (searchQuery.isNotBlank()) {
-                        val q = searchQuery.trim().lowercase(Locale.US)
-                        source.repo.lowercase(Locale.US).contains(q) ||
-                            source.patches.any { it.name.lowercase(Locale.US).contains(q) }
-                    } else false
-                }
                 AppSourceCard(
                     source = source,
-                    initiallyExpanded = autoExpand,
+                    initiallyExpanded = false,
                     onOpenUrl = openUrl,
                     onAddToMorphe = { openAddSource(context, it) }
                 )
@@ -814,17 +885,14 @@ internal fun AppSourceCard(
                         text = buildString {
                             append("${source.patches.size} ")
                             append(if (source.patches.size == 1) "patch" else "patches")
-                            if (source.exclusivePatchCount > 0) {
-                                append(" · ⭐ ${source.exclusivePatchCount} exclusive")
-                            }
                             formatBundleRelease(source.latestChanges)?.let { release ->
                                 append(" · ")
                                 append(release)
                             }
                         },
-                        color = if (source.exclusivePatchCount > 0) colors.primary else colors.onSurfaceVariant,
+                        color = colors.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -894,32 +962,12 @@ internal fun AppSourceCard(
                                     ),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                val sortedPatches = remember(source.patches, source.exclusivePatches) {
-                                    val exclusiveSet = source.exclusivePatches.map { it.lowercase(Locale.US) }.toSet()
-                                    source.patches.sortedWith(
-                                        compareByDescending<ArchivePatch> { 
-                                            it.name.lowercase(Locale.US) in exclusiveSet 
-                                        }.thenBy { it.name }
-                                    )
-                                }
-                                val exclusiveSet = remember(source.exclusivePatches) {
-                                    source.exclusivePatches.map { it.lowercase(Locale.US) }.toSet()
+                                val sortedPatches = remember(source.patches) {
+                                    source.patches.sortedBy { it.name }
                                 }
                                 sortedPatches.forEach { patch ->
-                                    val isExclusive = patch.name.lowercase(Locale.US) in exclusiveSet
                                     Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .then(
-                                                if (isExclusive) {
-                                                    Modifier
-                                                        .background(
-                                                            color = colors.primaryContainer.copy(alpha = 0.25f),
-                                                            shape = RoundedCornerShape(8.dp)
-                                                        )
-                                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                                } else Modifier
-                                            ),
+                                        modifier = Modifier.fillMaxWidth(),
                                         verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
                                         Row(
@@ -929,22 +977,16 @@ internal fun AppSourceCard(
                                             Icon(
                                                 imageVector = Icons.Outlined.Extension,
                                                 contentDescription = null,
-                                                tint = if (isExclusive) colors.primary else colors.onSurfaceVariant,
+                                                tint = colors.onSurfaceVariant,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Text(
                                                 text = patch.name,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isExclusive) colors.primary else colors.onSurface,
+                                                color = colors.onSurface,
                                                 style = MaterialTheme.typography.bodySmall,
                                                 modifier = Modifier.weight(1f)
                                             )
-                                            if (isExclusive) {
-                                                MorpheStatusBadge(
-                                                    text = "Exclusive",
-                                                    tone = SemanticTone.Warning
-                                                )
-                                            }
                                         }
                                         patch.description?.takeIf { it.isNotBlank() }?.let { desc ->
                                             Text(
@@ -1103,10 +1145,11 @@ internal fun SourceBrowserCard(
                         tone = SemanticTone.Neutral
                     )
                 }
-                if (source.exclusivePatchCount > 0) {
+                val stars = source.stars ?: 0
+                if (stars > 0) {
                     MorpheStatusBadge(
-                        text = "${source.exclusivePatchCount} exclusive",
-                        icon = Icons.Outlined.Extension,
+                        text = "$stars ★",
+                        icon = Icons.Outlined.Star,
                         tone = SemanticTone.Warning
                     )
                 }

@@ -1272,6 +1272,19 @@ internal fun HelperSettingsScreen(
                                 },
                                 onClick = { policyDialog = true }
                             )
+
+                            MorpheDivider(fullWidth = true)
+
+                            // Multi-connection Downloads
+                            SettingsSwitchItem(
+                                icon = Icons.Outlined.TrendingUp,
+                                title = "Multi-connection Downloads",
+                                subtitle = "Accelerate downloads using parallel segmented streams (for files > 8 MB)",
+                                checked = settings.multiThreadDownloadsEnabled,
+                                onToggle = {
+                                    onSettingsChange(settings.copy(multiThreadDownloadsEnabled = !settings.multiThreadDownloadsEnabled))
+                                }
+                            )
                         }
                     }
                 }
@@ -1522,6 +1535,18 @@ private fun SettingsPreferencesDetail(
                             }
                         },
                         onClick = onOpenPolicyDialog
+                    )
+
+                    MorpheDivider(fullWidth = true)
+
+                    SettingsSwitchItem(
+                        icon = Icons.Outlined.TrendingUp,
+                        title = "Multi-connection Downloads",
+                        subtitle = "Accelerate downloads using parallel segmented streams (for files > 8 MB)",
+                        checked = settings.multiThreadDownloadsEnabled,
+                        onToggle = {
+                            onSettingsChange(settings.copy(multiThreadDownloadsEnabled = !settings.multiThreadDownloadsEnabled))
+                        }
                     )
 
                     MorpheDivider(fullWidth = true)

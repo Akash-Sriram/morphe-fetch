@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
                 viewModel.finishEvents.collect { resultIntent ->
                     val uri = resultIntent.data
                     val fileName = resultIntent.getStringExtra(DownloadHelperContract.EXTRA_RESULT_FILE_NAME)
-                    if (callingActivity != null && uri != null) {
+                    if (uri != null) {
                         deliverHandoffToMorphe(uri, fileName)
                     } else if (callingActivity != null) {
                         setResult(Activity.RESULT_OK, resultIntent)
@@ -234,7 +234,7 @@ class MainActivity : ComponentActivity() {
             viewModel.cancelCompletionNotification()
             finish()
         } else {
-            viewModel.appendLog("Downloaded $cleanFileName successfully.")
+            sendApkToMorphe(shareableUri, cleanFileName)
         }
     }
 
@@ -284,6 +284,9 @@ class MainActivity : ComponentActivity() {
             runCatching { startActivity(Intent.createChooser(sendIntent, "Send to Morphe")) }
                 .onFailure { openMorpheManager() }
         }
+        DownloadJobManager.clearPendingResult(this)
+        viewModel.cancelCompletionNotification()
+        finish()
     }
 
     private fun openMorpheManager() {

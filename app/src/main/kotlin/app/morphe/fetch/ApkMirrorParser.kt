@@ -219,7 +219,9 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         )
         val directCandidates = runCatching {
             val directDoc = fetchDocument(directSearchUrl)
+            val expectedSlugs = apkMirrorExpectedAppSlugs(request)
             val releaseUrl = apkMirrorReleaseLinks(directDoc).firstOrNull { relUrl ->
+                if (apkMirrorAppSlugScore(relUrl, expectedSlugs) > 2) return@firstOrNull false
                 val v = request.requestedVersionNames.firstOrNull()
                 v == null || apkMirrorReleaseUrlMatchesVersion(relUrl, v)
             }
@@ -416,6 +418,7 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         val links = doc.select("a[href]")
 
         for (link in links) {
+            if (link.parents().any { it.id() == "sidebar" || it.hasClass("sidebar") || it.hasClass("widget") }) continue
             val rawHref = link.attr("href")
             val absUrl = apkMirrorAbsoluteUrl(rawHref) ?: continue
             val path = runCatching { java.net.URI(absUrl).path }.getOrNull() ?: continue
@@ -578,7 +581,7 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
                 continue
             }
 
-            apkMirrorPreferredReleaseUrl(apkMirrorReleaseLinks(doc), requestedVersions)
+            apkMirrorPreferredReleaseUrl(apkMirrorReleaseLinks(doc, appPageUrl), requestedVersions)
                 ?.let { return it }
         }
 
@@ -814,25 +817,28 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
                 it.fileKind == kind &&
                     request.acceptsFormat(it.fileKind)
             }
-            typedVariants.filter { apkMirrorDpiMatches(it.dpi) }
-                .takeIf(List<ApkMirrorVariant>::isNotEmpty)
-                ?.let { return it }
-            typedVariants.takeIf(List<ApkMirrorVariant>::isNotEmpty)
-                ?.let { return it }
+            typedVariants.preferRunnableArch(request)?.let { return it }
         }
 
-        val acceptedVariants = variants.filter { request.acceptsFormat(it.fileKind) }
-        val dpiPreferred = acceptedVariants.filter { apkMirrorDpiMatches(it.dpi) }
-        val dpiAnyFormat = variants.filter { apkMirrorDpiMatches(it.dpi) }
-        return when {
-            dpiPreferred.isNotEmpty() -> dpiPreferred
-            acceptedVariants.isNotEmpty() -> acceptedVariants
-            dpiAnyFormat.isNotEmpty() -> dpiAnyFormat
-            // No variant matches the requested format (e.g. APKS requested but the
-            // release is only offered as an APKM bundle): offer the best variant
-            // anyway and let the UI flag the format mismatch, like other sources do.
-            else -> variants
+        variants.filter { request.acceptsFormat(it.fileKind) }
+            .preferRunnableArch(request)
+            ?.let { return it }
+        return variants.preferRunnableArch(request) ?: variants
+    }
+
+    private fun List<ApkMirrorVariant>.preferRunnableArch(
+        request: HelperRequest
+    ): List<ApkMirrorVariant>? {
+        if (isEmpty()) return null
+        val ranked = sortedBy { archMatchRank(it.arch, request.availableAbis) }
+        val runnable = ranked.filter {
+            archMatchRank(it.arch, request.availableAbis) < ARCH_RANK_MISMATCH
         }
+        val pool = runnable.ifEmpty { ranked }
+        val bestRank = pool.minOf { archMatchRank(it.arch, request.availableAbis) }
+        val bestArchPool = pool.filter { archMatchRank(it.arch, request.availableAbis) == bestRank }
+        val dpiPreferred = bestArchPool.filter { apkMirrorDpiMatches(it.dpi) }
+        return dpiPreferred.ifEmpty { bestArchPool }
     }
 
     private fun apkMirrorExtractVersionCode(doc: Document): Long? {
@@ -914,7 +920,7 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
 
     private fun apkMirrorDpiMatches(dpi: String?): Boolean {
         val normalized = dpi?.lowercase(Locale.US)?.takeIf(String::isNotBlank) ?: return true
-        return normalized == "nodpi" || normalized == "anydpi"
+        return normalized == "nodpi" || normalized == "anydpi" || normalized.contains("120-640") || normalized == "all"
     }
 
     private fun apkMirrorDownloadButtonUrl(doc: Document, isBundle: Boolean): String? {

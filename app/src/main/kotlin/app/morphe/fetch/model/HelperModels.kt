@@ -431,6 +431,24 @@ internal data class CandidateResult(
             }
         }
     )
+
+    fun withUpdatedCandidate(candidate: DownloadCandidate): CandidateResult = copy(
+        sourceGroups = sourceGroups.map { group ->
+            if (group.source != candidate.source) group
+            else {
+                fun updateState(state: ResolveState): ResolveState = when (state) {
+                    is ResolveState.Done -> ResolveState.Done(
+                        state.candidates.map { if (it.identityKey() == candidate.identityKey()) candidate else it }
+                    )
+                    else -> state
+                }
+                group.copy(
+                    recommended = updateState(group.recommended),
+                    latest = updateState(group.latest)
+                )
+            }
+        }
+    )
 }
 
 internal data class SourceCandidateGroup(

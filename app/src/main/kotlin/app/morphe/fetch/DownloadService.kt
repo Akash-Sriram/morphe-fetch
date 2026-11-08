@@ -48,7 +48,7 @@ private const val CHANNEL_PROGRESS = "download_progress"
 private const val CHANNEL_DONE = "download_done"
 private const val NOTIFICATION_ID_PROGRESS = 1001
 internal const val NOTIFICATION_ID_DONE = 1002
-internal const val TEMP_CLEANUP_DELAY_MS = 5 * 60 * 1000L
+internal const val TEMP_CLEANUP_DELAY_MS = 10 * 60 * 1000L
 private const val PREFS_PENDING = "pending_download_result"
 
 
@@ -94,7 +94,7 @@ internal object DownloadJobManager {
         ) : Event
         data class Completed(val result: PendingDownloadResult, val epoch: Long = 0) : Event
         data class Failed(val candidate: DownloadCandidate, val message: String) : Event
-        data class Cancelled(val candidate: DownloadCandidate) : Event
+        data class Cancelled(val candidate: DownloadCandidate, val epoch: Long = 0) : Event
         // The downloaded file is valid except for its version code (which the
         // parser could not know up front). The file is kept so the UI can ask
         // whether to use it anyway.
@@ -128,6 +128,13 @@ internal object DownloadJobManager {
     private val _events = MutableStateFlow<Event?>(null)
     val events: StateFlow<Event?> = _events.asStateFlow()
 
+    fun isLive(epoch: Long): Boolean =
+        activeJob?.epoch == epoch && epoch != 0L
+
+    fun retireCurrent() {
+        activeJob = null
+    }
+
     fun start(job: DownloadJob) {
         currentEpoch++
         activeJob = job.copy(epoch = currentEpoch)
@@ -139,6 +146,15 @@ internal object DownloadJobManager {
     }
 
     fun emit(event: Event) {
+        val eventEpoch = when (event) {
+            is Event.Completed -> event.epoch
+            is Event.Cancelled -> event.epoch
+            else -> 0L
+        }
+        if (eventEpoch != 0L && activeJob?.epoch != eventEpoch) {
+            // Superseded or retired event: do not update activeJob or emit
+            return
+        }
         _events.value = event
         if (event is Event.Completed || event is Event.Cancelled) {
             activeJob = null
@@ -352,10 +368,7 @@ internal class DownloadService : Service() {
         AppIconResolver.cacheFromApkFile(this, candidate.packageName, file)
         recordHandOff(request, candidate, file, uri)
 
-        if (
-            settings.downloadLocation == DownloadLocation.DOWNLOADS ||
-            settings.deleteTemporaryAfterHandoff
-        ) {
+        if (settings.downloadLocation == DownloadLocation.DOWNLOADS) {
             scheduleTemporaryDelete(file)
         }
 
@@ -375,7 +388,7 @@ internal class DownloadService : Service() {
     }
 
     private fun handleCancelled(job: DownloadJobManager.DownloadJob) {
-        DownloadJobManager.emit(DownloadJobManager.Event.Cancelled(job.candidate))
+        DownloadJobManager.emit(DownloadJobManager.Event.Cancelled(job.candidate, job.epoch))
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -402,7 +415,8 @@ internal class DownloadService : Service() {
         val safeName = outputName.sanitizeFileName()
         val outputFile = File(downloadsDir, safeName)
         val stagedFile = File(downloadsDir, "$safeName.part")
-        val downloadResult = downloader.downloadToFile(downloadFile, stagedFile) { copied, total ->
+        val multiThreadEnabled = DownloadJobManager.activeJob?.settings?.multiThreadDownloadsEnabled ?: true
+        val downloadResult = downloader.downloadToFile(downloadFile, stagedFile, multiThreadEnabled) { copied, total ->
             updateDownloadProgress(candidate, copied, total)
         }
         val targetExtension = fileKindFromUrl(downloadResult.finalUrl)
@@ -422,8 +436,9 @@ internal class DownloadService : Service() {
             stagedFile.copyTo(finalOutputFile, overwrite = true)
             stagedFile.delete()
         }
-        verifyExpectedSha256(candidate, downloadFile, finalOutputFile)
-        return finalOutputFile
+        val normalizedOutputFile = ArchiveTypeDetector.normalizeExtension(finalOutputFile)
+        verifyExpectedSha256(candidate, downloadFile, normalizedOutputFile)
+        return normalizedOutputFile
     }
 
     /**
@@ -469,7 +484,7 @@ internal class DownloadService : Service() {
                 downloadsDir,
                 "${candidate.packageName}-${candidate.source.name}-split_$index.part".sanitizeFileName()
             )
-            downloader.downloadToFile(file, stagedFile) { fileCopied, total ->
+            downloader.downloadToFile(file, stagedFile, multiThreadEnabled = false) { fileCopied, total ->
                 knownTotal?.let { updateDownloadProgress(candidate, completed + fileCopied, it) }
             }
             completed += stagedFile.length()
@@ -509,6 +524,7 @@ internal class DownloadService : Service() {
         when {
             url.contains("apkpure", ignoreCase = true) -> apkPureClient
             url.contains("apkmirror", ignoreCase = true) -> apkMirrorClient
+            url.contains("uptodown.com", ignoreCase = true) || url.contains("uptodown.net", ignoreCase = true) -> MorpheHttpClient.uptodownDownloadClient
             else -> client
         }
 

@@ -87,6 +87,13 @@ internal fun CandidateCard(
                 icon = Icons.Outlined.Download,
                 modifier = Modifier.fillMaxWidth()
             )
+        } else if (candidate.source == DownloadSource.UPTODOWN) {
+            HelperButton(
+                text = "Download and return",
+                onClick = { onSolveCaptcha(candidate) },
+                icon = Icons.Outlined.Download,
+                modifier = Modifier.fillMaxWidth()
+            )
         } else if (candidate.option == CandidateOption.MANUAL) {
             HelperButton(
                 text = "Open in app",

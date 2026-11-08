@@ -194,6 +194,7 @@ internal fun AppBrowserScreen(
                             AppStatusFilter.Installed -> isPackageOrPatchedInstalled(app.packageName, installedPackages)
                             AppStatusFilter.NotInstalled -> !isPackageOrPatchedInstalled(app.packageName, installedPackages)
                             AppStatusFilter.Favourites -> app.packageName in favourites
+                            AppStatusFilter.Featured -> app.isFeatured
                         }
                     }
                     .let { matches ->
@@ -581,6 +582,7 @@ private fun MasterListPane(
                                 AppStatusFilter.Installed -> "No patched apps in the index are installed."
                                 AppStatusFilter.NotInstalled ->
                                     "Every app in the index is installed on this device."
+                                AppStatusFilter.Featured -> "No featured apps found."
                                 null -> "No apps match \"$query\"."
                             }
                         )
