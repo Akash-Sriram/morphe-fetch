@@ -475,7 +475,7 @@ private fun parseArchiveTimestamp(value: String?): Long? {
 internal object MorpheArchive {
 
     const val PROCESSED_INDEX_URL =
-        "https://raw.githubusercontent.com/Akash-Sriram/morphe-fetch/archive-data/data/processed_archive.min.json"
+        "https://raw.githubusercontent.com/Akash-Sriram/morphe-fetch/main/data/processed_archive.min.json"
 
     const val UPSTREAM_INDEX_URL =
         "https://raw.githubusercontent.com/rushiforai/morphe-archive/refs/heads/main/docs/data.json"

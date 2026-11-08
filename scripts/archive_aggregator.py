@@ -711,43 +711,21 @@ class CatalogAggregator:
             # Sort sources by primary score and stars
             sources.sort(key=lambda s: (score_primary_repo(s["repo"]), s.get("stars", 0)), reverse=True)
 
-            # Map cleaned patch sets to identify mirrors
-            source_patches = {}
-            for s in sources:
-                source_patches[s["repo"]] = set(clean_patch_name(p["name"]).lower() for p in s.get("patches", []))
-
+            # Calculate patch occurrences across sources for this app
             all_occurrences = Counter()
-            for p_set in source_patches.values():
-                for p in p_set:
-                    all_occurrences[p] += 1
-
-            clustered_sources = []
-            handled_repos = set()
-
             for s in sources:
-                r_name = s["repo"]
-                if r_name in handled_repos:
-                    continue
+                for p in s.get("patches", []):
+                    all_occurrences[clean_patch_name(p["name"]).lower()] += 1
 
-                p_set = source_patches[r_name]
-                identical_mirrors = []
-                if p_set:
-                    for s2 in sources:
-                        r2_name = s2["repo"]
-                        if r2_name == r_name or r2_name in handled_repos:
-                            continue
-                        if source_patches[r2_name] and p_set == source_patches[r2_name]:
-                            identical_mirrors.append(r2_name)
-                            handled_repos.add(r2_name)
-
-                handled_repos.add(r_name)
-
+            app_sources = []
+            for s in sources:
                 exclusive = [p["name"] for p in s.get("patches", []) if all_occurrences[clean_patch_name(p["name"]).lower()] == 1]
                 s_copy = dict(s)
                 s_copy["exclusivePatchCount"] = len(exclusive)
                 s_copy["exclusivePatches"] = exclusive
-                s_copy["mirrors"] = identical_mirrors
-                clustered_sources.append(s_copy)
+                s_copy["mirrors"] = []
+                app_sources.append(s_copy)
+
 
             patch_details_list = [
                 {"name": name, "description": desc}
@@ -766,7 +744,7 @@ class CatalogAggregator:
                 "patches": sorted(app_data["patches"]),
                 "patchDetails": patch_details_list,
                 "versions": sorted(app_data["versions"]),
-                "sources": clustered_sources
+                "sources": app_sources
             })
 
         # Sort apps: featured first, then by patchCount descending, then name

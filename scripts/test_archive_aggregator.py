@@ -223,7 +223,7 @@ class TestCatalogAggregator(unittest.TestCase):
         self.assertIn("working/repo", attached_repos)
         self.assertNotIn("empty/repo", attached_repos)
 
-    def test_zero_patch_repos_not_clustered_as_mirrors(self):
+    def test_independent_repos_not_collapsed_by_matching_patch_names(self):
         class MockSource(BaseCatalogSource):
             def __init__(self):
                 super().__init__("mock_src")
@@ -254,8 +254,12 @@ class TestCatalogAggregator(unittest.TestCase):
         aggregator = CatalogAggregator([MockSource()], verify_releases=False)
         result = aggregator.run()
         app_x = result["apps"][0]
-        self.assertEqual(len(app_x["sources"]), 1) # Clustered because both have non-empty P1
-        self.assertEqual(app_x["sources"][0]["mirrors"], ["repo/two"])
+        # Both independent repositories must be displayed as their own standalone sources
+        self.assertEqual(len(app_x["sources"]), 2)
+        source_repos = [s["repo"] for s in app_x["sources"]]
+        self.assertIn("repo/one", source_repos)
+        self.assertIn("repo/two", source_repos)
+
 
 if __name__ == "__main__":
     unittest.main()

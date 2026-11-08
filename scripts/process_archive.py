@@ -19,10 +19,12 @@ def main():
         if arg.strip():
             output_file = arg
             break
+    repo_root = os.path.abspath(os.path.join(script_dir, ".."))
     if not output_file:
-        output_file = os.path.join(script_dir, "processed_archive.json")
+        output_file = os.path.join(repo_root, "data", "processed_archive.json")
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
     min_file = output_file.replace(".json", ".min.json")
-    bundled_asset = os.path.join(script_dir, "..", "app", "src", "main", "assets", "morphe_archive_bundled.json")
+    bundled_asset = os.path.join(repo_root, "app", "src", "main", "assets", "morphe_archive_bundled.json")
 
     aggregator = CatalogAggregator()
     aggregator.add_source(RushArchiveSource())
