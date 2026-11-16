@@ -74,6 +74,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -185,6 +186,7 @@ internal fun ReuseOfferDialog(
     onUseExisting: (ReuseOption) -> Unit,
     onDownloadNew: () -> Unit
 ) {
+    val maxDialogHeight = (LocalConfiguration.current.screenHeightDp * 0.75f).dp
     AlertDialog(
         onDismissRequest = onDownloadNew,
         title = {
@@ -195,7 +197,10 @@ internal fun ReuseOfferDialog(
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxDialogHeight)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ContentPaddingSmall)
             ) {
                 Text(

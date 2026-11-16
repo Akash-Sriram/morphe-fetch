@@ -797,6 +797,7 @@ internal fun HelperSettingsScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth(0.92f)
+                    .widthIn(max = 520.dp)
                     .heightIn(max = maxDialogHeight),
                 shape = RoundedCornerShape(MorpheDefaults.SectionCornerRadius),
                 color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
@@ -862,25 +863,81 @@ internal fun HelperSettingsScreen(
         }
     }
     if (!isExpanded && historyDialog) {
-        AlertDialog(
+        val maxDialogHeight = (LocalConfiguration.current.screenHeightDp * 0.88f).dp
+        Dialog(
             onDismissRequest = { historyDialog = false },
-            confirmButton = {
-                HelperButton(text = "Close", onClick = { historyDialog = false })
-            },
-            title = {
-                Text("Download History", fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Box(modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .widthIn(max = 520.dp)
+                    .heightIn(max = maxDialogHeight),
+                shape = RoundedCornerShape(MorpheDefaults.SectionCornerRadius),
+                color = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp),
+                tonalElevation = 1.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 20.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
+                            Text("Download History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "${historyEntries.size} saved files",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = { historyDialog = false },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = "Close",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // Content
                     DownloadHistorySection(
                         entries = historyEntries,
                         onClear = onClearHistory,
                         onOpen = onOpenHistoryEntry,
-                        onShare = onShareHistoryEntry
+                        onShare = onShareHistoryEntry,
+                        showHeader = false
                     )
                 }
             }
-        )
+        }
     }
 
     if (locationDialog) {

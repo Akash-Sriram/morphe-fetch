@@ -30,7 +30,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.buildAnnotatedString
@@ -499,34 +502,73 @@ internal fun SettingsChoiceDialog(
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    val maxDialogHeight = (LocalConfiguration.current.screenHeightDp * 0.85f).dp
+    Dialog(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.background,
-        title = {
-            Text(text = title, fontWeight = FontWeight.Bold)
-        },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .widthIn(max = 440.dp)
+                .heightIn(max = maxDialogHeight),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp),
+            tonalElevation = 2.dp
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ContentPaddingSmall)
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
             ) {
-                choices.forEachIndexed { index, choice ->
-                    SettingsOptionCard(
-                        icon = choice.icon,
-                        title = choice.title,
-                        description = choice.description,
-                        selected = index == selectedIndex,
-                        source = choice.source,
-                        onClick = { onSelect(index) }
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Close",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                // Choices list
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    choices.forEachIndexed { index, choice ->
+                        SettingsOptionCard(
+                            icon = choice.icon,
+                            title = choice.title,
+                            description = choice.description,
+                            selected = index == selectedIndex,
+                            source = choice.source,
+                            onClick = { onSelect(index) }
+                        )
+                    }
                 }
             }
-        },
-        confirmButton = {}
-    )
+        }
+    }
 }
 
 internal fun DownloadLocation.icon(): ImageVector = when (this) {
@@ -555,7 +597,7 @@ internal fun SettingsRowSurface(
     content: @Composable () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(MorpheDefaults.SettingsCornerRadius)
+    val shape = RoundedCornerShape(12.dp)
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -568,14 +610,16 @@ internal fun SettingsRowSurface(
                 }
             ),
         shape = shape,
-        color = if (selected) colors.surfaceVariant else colors.surfaceColorAtElevation(3.dp),
-        contentColor = colors.onSurface,
-        tonalElevation = if (selected) 0.dp else 1.dp,
-        border = if (selected) {
-            BorderStroke(1.5.dp, colors.onSurface.copy(alpha = 0.5f))
+        color = if (selected) {
+            colors.primary.copy(alpha = 0.10f)
         } else {
-            null
-        }
+            colors.surfaceVariant.copy(alpha = 0.40f)
+        },
+        contentColor = colors.onSurface,
+        border = BorderStroke(
+            width = if (selected) 1.5.dp else 1.dp,
+            color = if (selected) colors.primary else colors.outlineVariant.copy(alpha = 0.35f)
+        )
     ) {
         content()
     }
@@ -596,33 +640,46 @@ internal fun SettingsOptionCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(MorpheDefaults.ContentPadding),
-            horizontalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing),
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (source != null) {
-                SourceAvatar(source = source, size = MorpheDefaults.IconSize)
+                SourceAvatar(source = source, size = 32.dp)
             } else if (icon != null) {
-                ThemedIcon(
-                    icon = icon,
-                    size = MorpheDefaults.IconSize,
-                    tint = if (selected) colors.primary else colors.onSurfaceVariant
-                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (selected) colors.primary.copy(alpha = 0.15f)
+                            else colors.onSurface.copy(alpha = 0.06f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = if (selected) colors.primary else colors.onSurfaceVariant
+                    )
+                }
             }
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
                     color = colors.onSurface
                 )
                 Text(
-                    description,
+                    text = description,
                     color = colors.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodySmall,
+                    lineHeight = 16.sp
                 )
             }
             RadioDot(selected = selected)
@@ -635,7 +692,8 @@ internal fun DownloadHistorySection(
     entries: List<DownloadHistoryEntry>,
     onClear: () -> Unit,
     onOpen: (DownloadHistoryEntry) -> Unit,
-    onShare: (DownloadHistoryEntry) -> Unit
+    onShare: (DownloadHistoryEntry) -> Unit,
+    showHeader: Boolean = true
 ) {
     val context = LocalContext.current
     var localCleared by remember { mutableStateOf(0) }
@@ -643,26 +701,28 @@ internal fun DownloadHistorySection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Download history",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f)
-            )
-            HelperOutlinedButton(
-                text = "Clear",
-                enabled = entries.isNotEmpty(),
-                onClick = {
-                    onClear()
-                    localCleared++
-                },
-                modifier = Modifier.width(MorpheDefaults.CompactButtonWidth)
-            )
+        if (showHeader) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(MorpheDefaults.ItemSpacing),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Download history",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                HelperOutlinedButton(
+                    text = "Clear",
+                    enabled = entries.isNotEmpty(),
+                    onClick = {
+                        onClear()
+                        localCleared++
+                    },
+                    modifier = Modifier.width(MorpheDefaults.CompactButtonWidth)
+                )
+            }
         }
 
         val currentEntries = remember(entries.size, entries.lastOrNull(), localCleared) { entries.toList() }
