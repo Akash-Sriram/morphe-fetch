@@ -253,9 +253,9 @@ internal enum class DownloadSource(
     val supportsManualArtifactPicker: Boolean = true
 ) {
     AURORA("Aurora", 0),
-    APK_PURE("APKPure", 1),
-    UPTODOWN("Uptodown", 2),
-    APK_MIRROR("APKMirror", 3)
+    APK_MIRROR("APKMirror", 1),
+    APK_PURE("APKPure", 2),
+    UPTODOWN("Uptodown", 3)
 }
 
 internal fun DownloadSource.searchDomain(): String? = when (this) {
@@ -381,7 +381,8 @@ internal data class CandidateDownloadFile(
 internal data class DownloadedApkMetadata(
     val packageName: String,
     val versionName: String?,
-    val versionCode: Long?
+    val versionCode: Long?,
+    val minSdkVersion: Int? = null
 )
 
 internal data class CandidateResult(

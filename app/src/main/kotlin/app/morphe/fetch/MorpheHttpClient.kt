@@ -83,6 +83,7 @@ internal object MorpheHttpClient {
         private set
 
     const val APKPURE_USER_AGENT = "APKPure/3.19.39 (Aegon)"
+    const val MORPHE_FETCH_USER_AGENT = "MorpheFetch/1.0"
 
     @Volatile
     var appContext: Context? = null
@@ -146,22 +147,28 @@ internal object MorpheHttpClient {
                     else -> "cross-site"
                 }
 
+                val isApkMirror = reqHost.equals("apkmirror.com", ignoreCase = true) || reqHost.endsWith(".apkmirror.com", ignoreCase = true)
+                val effectiveUa = if (isApkMirror) MORPHE_FETCH_USER_AGENT else browserUserAgent
+
                 val reqBuilder = req.newBuilder()
-                    .header("User-Agent", browserUserAgent)
+                    .header("User-Agent", effectiveUa)
                     .header(
                         "Accept",
                         "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
                     )
                     .header("Accept-Language", buildAcceptLanguage())
-                    .header("sec-ch-ua", derivedSecChUa(browserUserAgent))
-                    .header("sec-ch-ua-mobile", "?1")
-                    .header("sec-ch-ua-platform", "\"Android\"")
                     .header("Upgrade-Insecure-Requests", "1")
                     .header("Sec-Fetch-Site", fetchSite)
                     .header("Sec-Fetch-Mode", "navigate")
                     .header("Sec-Fetch-User", "?1")
                     .header("Sec-Fetch-Dest", "document")
                     .header("Priority", "u=0, i")
+
+                if (!isApkMirror) {
+                    reqBuilder.header("sec-ch-ua", derivedSecChUa(browserUserAgent))
+                        .header("sec-ch-ua-mobile", "?1")
+                        .header("sec-ch-ua-platform", "\"Android\"")
+                }
 
                 if (req.header("Cache-Control") == null) {
                     reqBuilder.header("Cache-Control", "max-age=0")
@@ -213,15 +220,12 @@ internal object MorpheHttpClient {
                 }
 
                 val reqBuilder = req.newBuilder()
-                    .header("User-Agent", browserUserAgent)
+                    .header("User-Agent", MORPHE_FETCH_USER_AGENT)
                     .header(
                         "Accept",
                         "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
                     )
                     .header("Accept-Language", buildAcceptLanguage())
-                    .header("sec-ch-ua", derivedSecChUa(browserUserAgent))
-                    .header("sec-ch-ua-mobile", "?1")
-                    .header("sec-ch-ua-platform", "\"Android\"")
                     .header("Upgrade-Insecure-Requests", "1")
                     .header("Sec-Fetch-Site", fetchSite)
                     .header("Sec-Fetch-Mode", "navigate")

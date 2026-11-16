@@ -86,7 +86,7 @@ internal class OkHttpApkPureApi(
             .build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("APKPure API error: HTTP ${resp.code}")
-            val json = resp.body?.string().orEmpty()
+            val json = resp.body.string()
             gson.fromJson(json, ApkPureUpdateResponse::class.java)
         }
     }
@@ -143,4 +143,66 @@ internal data class ApkPureDeviceInfo(
     val os_ver_name: String = runCatching { Build.VERSION.RELEASE }.getOrNull() ?: "",
     val platform: Int = 1
 )
+
+internal interface ApkMirrorApi {
+    suspend fun appExists(request: ApkMirrorAppExistsRequest): ApkMirrorAppExistsResponse
+}
+
+internal class OkHttpApkMirrorApi(
+    private val client: OkHttpClient,
+    private val gson: Gson
+) : ApkMirrorApi {
+    override suspend fun appExists(
+        request: ApkMirrorAppExistsRequest
+    ): ApkMirrorAppExistsResponse = withContext(Dispatchers.IO) {
+        val requestBody = gson.toJson(request).toRequestBody("application/json".toMediaType())
+        val req = Request.Builder()
+            .url("https://www.apkmirror.com/wp-json/apkm/v1/app_exists/")
+            .header("Authorization", "Basic YXBpLWFwa3VwZGF0ZXI6cm01cmNmcnVVakt5MDRzTXB5TVBKWFc4")
+            .header("Content-Type", "application/json")
+            .post(requestBody)
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("APKMirror API error: HTTP ${resp.code}")
+            val json = resp.body.string()
+            gson.fromJson(json, ApkMirrorAppExistsResponse::class.java)
+        }
+    }
+}
+
+internal data class ApkMirrorAppExistsRequest(
+    val pnames: List<String>,
+    val exclude: List<String> = listOf("alpha", "beta")
+)
+
+internal data class ApkMirrorAppExistsResponse(
+    val data: List<ApkMirrorAppExistsData> = emptyList()
+)
+
+internal data class ApkMirrorAppExistsData(
+    val pname: String = "",
+    val exists: Boolean = false,
+    val release: ApkMirrorAppExistsRelease = ApkMirrorAppExistsRelease(),
+    val apks: List<ApkMirrorAppExistsApk> = emptyList()
+)
+
+internal data class ApkMirrorAppExistsRelease(
+    val version: String = "",
+    val link: String = "",
+    @SerializedName("whats_new") val whatsNew: String? = null
+)
+
+internal data class ApkMirrorAppExistsApk(
+    @SerializedName("version_code") val versionCode: Long = 0L,
+    val link: String = "",
+    val arches: List<String> = emptyList(),
+    val dpis: List<String>? = null,
+    val minapi: String = "0",
+    val description: String? = null,
+    val capabilities: List<String>? = null,
+    @SerializedName("download_types") val downloadTypes: List<String> = emptyList(),
+    @SerializedName("signatures-sha1") val signaturesSha1: List<String>? = null,
+    @SerializedName("signatures-sha256") val signaturesSha256: List<String>? = null
+)
+
 

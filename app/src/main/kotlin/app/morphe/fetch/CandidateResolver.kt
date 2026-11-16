@@ -84,8 +84,19 @@ internal class CandidateResolver(
         request: HelperRequest,
         source: DownloadSource,
         option: CandidateOption
-    ): List<DownloadCandidate> =
-        parsers[source]?.findCandidates(request, option).orEmpty()
+    ): List<DownloadCandidate> {
+        val parserCandidates = parsers[source]?.findCandidates(request, option).orEmpty()
+        val hintCandidates = if (option != CandidateOption.MANUAL) {
+            val hintUrls = (request.sourceHintUrls + listOfNotNull(request.fallbackWebUrl.takeIf { it.isNotBlank() })).distinct()
+            hintUrls.filter { morpheResolvedSource(it) == source || MorpheLinkParser.canParse(it) }
+                .flatMap { url ->
+                    MorpheLinkParser.parseLink(url, request, option, MorpheHttpClient.baseClient, parsers)
+                }
+        } else {
+            emptyList()
+        }
+        return (hintCandidates + parserCandidates).distinctBy(DownloadCandidate::identityKey)
+    }
 
     fun recommendedCandidatesForSource(
         request: HelperRequest,

@@ -178,7 +178,7 @@ internal fun Context.syncNightModeWithSystem(themeMode: ThemeMode) {
 private inline fun <reified T : Enum<T>> enumValueOrDefault(name: String?, fallback: T): T =
     name?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback
 
-internal fun Context.temporaryDownloadsDir(): File = File(cacheDir, "downloads")
+internal fun Context.temporaryDownloadsDir(): File = File(filesDir, "downloads")
 
 internal fun Context.temporaryDownloadsSize(): Long =
     temporaryDownloadsDir()

@@ -166,7 +166,176 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
             resolveApkMirrorLatestInfo(request, apkMirrorPackageSearchUrl(request.packageName))
         }.getOrNull())
 
-    private fun findApkMirrorLatest(request: HelperRequest): List<DownloadCandidate> {
+    private suspend fun apkMirrorApiLatestCandidates(request: HelperRequest): List<DownloadCandidate> {
+        val api = ctx.apkMirrorApi ?: return emptyList()
+        val response = api.appExists(ApkMirrorAppExistsRequest(pnames = listOf(request.packageName)))
+        val appData = response.data.firstOrNull { it.pname.equals(request.packageName, ignoreCase = true) } ?: return emptyList()
+        val release = appData.release
+        val versionName = release.version.takeIf { it.isNotBlank() }
+
+        val compatibleApks = appData.apks.filter { apk ->
+            val caps = apk.capabilities.orEmpty()
+            if (caps.contains("wear_standalone") || caps.contains("leanback_standalone")) return@filter false
+            val minApi = apk.minapi.toIntOrNull()
+            if (minApi != null && minApi > android.os.Build.VERSION.SDK_INT) return@filter false
+            if (apk.arches.isNotEmpty()) {
+                val bestRank = apk.arches.minOfOrNull { archMatchRank(it, request.availableAbis) } ?: ARCH_RANK_MISMATCH
+                if (bestRank >= ARCH_RANK_MISMATCH) return@filter false
+            }
+            true
+        }
+
+        if (compatibleApks.isEmpty()) return emptyList()
+
+        val wantsSingleApk = !request.allowSplitArchive || request.requestedFileKinds == setOf("apk")
+        val filteredApks = if (wantsSingleApk) {
+            val nonBundles = compatibleApks.filter { apk ->
+                apk.downloadTypes.none { it.equals("BUNDLE", ignoreCase = true) }
+            }
+            nonBundles.ifEmpty { compatibleApks }
+        } else {
+            compatibleApks
+        }
+
+        return filteredApks.mapNotNull { apk ->
+            val apkUrl = apk.link.let {
+                if (it.startsWith("http")) it else "https://www.apkmirror.com${if (it.startsWith("/")) "" else "/"}$it"
+            }
+            val isBundle = apk.downloadTypes.any { it.equals("BUNDLE", ignoreCase = true) }
+            val variantLabel = apk.arches.joinToString().ifBlank { null }
+
+            runCatching {
+                val variantDoc = fetchDocument(apkUrl)
+                if (variantDoc.isCloudflareChallenge()) return@mapNotNull null
+                val downloadButtonUrl = apkMirrorDownloadButtonUrl(variantDoc, isBundle, forceBaseApk = wantsSingleApk && isBundle) ?: return@mapNotNull null
+                val downloadDoc = fetchDocument(downloadButtonUrl, referer = apkUrl)
+                if (downloadDoc.isCloudflareChallenge()) return@mapNotNull null
+                val finalUrl = apkMirrorFinalDownloadUrl(downloadDoc) ?: return@mapNotNull null
+                val fileKind = if (wantsSingleApk && isBundle && downloadButtonUrl.contains("forcebaseapk=true")) {
+                    "apk"
+                } else if (isBundle) {
+                    "apkm"
+                } else {
+                    fileKindFromUrl(finalUrl)
+                }
+                val expectedSha256 = if (isBundle && fileKind != "apk") null else apkMirrorVariantFileSha256(variantDoc)
+
+                DownloadCandidate(
+                    source = DownloadSource.APK_MIRROR,
+                    name = request.appName,
+                    packageName = request.packageName,
+                    versionName = versionName,
+                    versionCode = apk.versionCode.takeIf { it > 0L },
+                    url = finalUrl,
+                    fileKind = fileKind,
+                    option = CandidateOption.LATEST,
+                    directDownload = true,
+                    captchaUrl = downloadButtonUrl,
+                    versionStatus = VersionStatus.LATEST,
+                    formatMatches = request.acceptsFormat(fileKind),
+                    variantLabel = variantLabel,
+                    files = listOf(
+                        CandidateDownloadFile(
+                            url = finalUrl,
+                            fileName = "${request.packageName}-${versionName ?: "latest"}-apkmirror${variantLabel.variantFileSuffix()}.$fileKind".sanitizeFileName(),
+                            referer = downloadButtonUrl,
+                            expectedSha256 = expectedSha256
+                        )
+                    )
+                )
+            }.onFailure { Log.w(TAG, "APKMirror API variant resolve failed for $apkUrl", it) }.getOrNull()
+        }.distinctBy(DownloadCandidate::identityKey)
+    }
+
+    private suspend fun apkMirrorApiRequestedCandidates(request: HelperRequest): List<DownloadCandidate> {
+        val api = ctx.apkMirrorApi ?: return emptyList()
+        val response = api.appExists(ApkMirrorAppExistsRequest(pnames = listOf(request.packageName)))
+        val appData = response.data.firstOrNull { it.pname.equals(request.packageName, ignoreCase = true) } ?: return emptyList()
+        val release = appData.release
+        if (!request.matchesRequestedVersion(release.version, null)) return emptyList()
+
+        val wantsSingleApk = !request.allowSplitArchive || request.requestedFileKinds == setOf("apk")
+        val compatibleApks = appData.apks.filter { apk ->
+            val caps = apk.capabilities.orEmpty()
+            if (caps.contains("wear_standalone") || caps.contains("leanback_standalone")) return@filter false
+            val minApi = apk.minapi.toIntOrNull()
+            if (minApi != null && minApi > android.os.Build.VERSION.SDK_INT) return@filter false
+            if (apk.arches.isNotEmpty()) {
+                val bestRank = apk.arches.minOfOrNull { archMatchRank(it, request.availableAbis) } ?: ARCH_RANK_MISMATCH
+                if (bestRank >= ARCH_RANK_MISMATCH) return@filter false
+            }
+            true
+        }
+
+        if (compatibleApks.isEmpty()) return emptyList()
+
+        val filteredApks = if (wantsSingleApk) {
+            val nonBundles = compatibleApks.filter { apk ->
+                apk.downloadTypes.none { it.equals("BUNDLE", ignoreCase = true) }
+            }
+            nonBundles.ifEmpty { compatibleApks }
+        } else {
+            compatibleApks
+        }
+
+        return filteredApks.mapNotNull { apk ->
+            val apkUrl = apk.link.let {
+                if (it.startsWith("http")) it else "https://www.apkmirror.com${if (it.startsWith("/")) "" else "/"}$it"
+            }
+            val isBundle = apk.downloadTypes.any { it.equals("BUNDLE", ignoreCase = true) }
+            val variantLabel = apk.arches.joinToString().ifBlank { null }
+
+            runCatching {
+                val variantDoc = fetchDocument(apkUrl)
+                if (variantDoc.isCloudflareChallenge()) return@mapNotNull null
+                val downloadButtonUrl = apkMirrorDownloadButtonUrl(variantDoc, isBundle, forceBaseApk = wantsSingleApk && isBundle) ?: return@mapNotNull null
+                val downloadDoc = fetchDocument(downloadButtonUrl, referer = apkUrl)
+                if (downloadDoc.isCloudflareChallenge()) return@mapNotNull null
+                val finalUrl = apkMirrorFinalDownloadUrl(downloadDoc) ?: return@mapNotNull null
+                val fileKind = if (wantsSingleApk && isBundle && downloadButtonUrl.contains("forcebaseapk=true")) {
+                    "apk"
+                } else if (isBundle) {
+                    "apkm"
+                } else {
+                    fileKindFromUrl(finalUrl)
+                }
+                val expectedSha256 = if (isBundle && fileKind != "apk") null else apkMirrorVariantFileSha256(variantDoc)
+
+                DownloadCandidate(
+                    source = DownloadSource.APK_MIRROR,
+                    name = request.appName,
+                    packageName = request.packageName,
+                    versionName = release.version,
+                    versionCode = apk.versionCode.takeIf { it > 0L },
+                    url = finalUrl,
+                    fileKind = fileKind,
+                    option = CandidateOption.REQUESTED,
+                    directDownload = true,
+                    captchaUrl = downloadButtonUrl,
+                    versionStatus = VersionStatus.REQUESTED,
+                    formatMatches = request.acceptsFormat(fileKind),
+                    variantLabel = variantLabel,
+                    files = listOf(
+                        CandidateDownloadFile(
+                            url = finalUrl,
+                            fileName = "${request.packageName}-${release.version}-apkmirror${variantLabel.variantFileSuffix()}.$fileKind".sanitizeFileName(),
+                            referer = downloadButtonUrl,
+                            expectedSha256 = expectedSha256
+                        )
+                    )
+                )
+            }.onFailure { Log.w(TAG, "APKMirror API requested variant resolve failed for $apkUrl", it) }.getOrNull()
+        }.distinctBy(DownloadCandidate::identityKey)
+    }
+
+    private suspend fun findApkMirrorLatest(request: HelperRequest): List<DownloadCandidate> {
+        val apiCandidates = runCatching { apkMirrorApiLatestCandidates(request) }
+            .onFailure { Log.w(TAG, "APKMirror API latest candidates failed", it) }
+            .getOrDefault(emptyList())
+        if (apiCandidates.isNotEmpty()) {
+            return apiCandidates
+        }
+
         val latestInfo = resolveApkMirrorLatestInfo(
             request = request,
             searchUrl = apkMirrorPackageSearchUrl(request.packageName)
@@ -208,8 +377,15 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         )
     }
 
-    private fun findApkMirrorRequested(request: HelperRequest): List<DownloadCandidate> {
+    private suspend fun findApkMirrorRequested(request: HelperRequest): List<DownloadCandidate> {
         if (!request.hasKnownVersionRequest) return emptyList()
+
+        val apiCandidates = runCatching { apkMirrorApiRequestedCandidates(request) }
+            .onFailure { Log.w(TAG, "APKMirror API requested candidates failed", it) }
+            .getOrDefault(emptyList())
+        if (apiCandidates.isNotEmpty()) {
+            return apiCandidates
+        }
 
         // 1. Fast path: search directly for the specific release query (e.g. "Google Photos 7.93.0.982110057")
         val directSearchUrl = apkMirrorBrowserSearchUrl(
@@ -703,7 +879,8 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         }
 
         val isBundle = variant?.isBundle ?: apkMirrorPageLooksBundle(variantDoc)
-        val downloadButtonUrl = apkMirrorDownloadButtonUrl(variantDoc, isBundle) ?: return null
+        val wantsBaseApk = (!request.allowSplitArchive || request.requestedFileKinds == setOf("apk")) && isBundle
+        val downloadButtonUrl = apkMirrorDownloadButtonUrl(variantDoc, isBundle, forceBaseApk = wantsBaseApk) ?: return null
         val downloadDoc = fetchDocument(downloadButtonUrl, referer = variantPageUrl)
         if (downloadDoc.isCloudflareChallenge()) {
             throw SourceChallengeException(
@@ -715,7 +892,11 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         val finalUrl = apkMirrorFinalDownloadUrl(downloadDoc) ?: return null
         val resolvedVersion = versionName
             ?: apkMirrorVersionFromReleaseUrl(releaseUrl)
-        val fileKind = variant?.fileKind ?: if (isBundle) "apkm" else fileKindFromUrl(finalUrl)
+        val fileKind = if (wantsBaseApk && downloadButtonUrl.contains("forcebaseapk=true")) {
+            "apk"
+        } else {
+            variant?.fileKind ?: if (isBundle) "apkm" else fileKindFromUrl(finalUrl)
+        }
         val variantLabel = variant?.displayLabel()
         val variantFileSuffix = variantLabel.variantFileSuffix()
         // APKMirror publishes the file's SHA-256 in the variant page's safe-
@@ -846,16 +1027,17 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         for (row in specRows) {
             val text = row.text()
             if (text.contains("Version code", ignoreCase = true)) {
-                val digits = Regex("""\b(\d{6,11})\b""").find(text)?.groupValues?.get(1)
+                val digits = Regex("""(?i)Version\s*code\s*[:\s]+(\d+)""").find(text)?.groupValues?.get(1)
+                    ?: Regex("""\b(\d{3,11})\b""").find(text)?.groupValues?.get(1)
                 digits?.toLongOrNull()?.let { return it }
             }
         }
         val title = doc.selectFirst("h1, h2, .version-title, .app-title")?.text().orEmpty()
-        Regex("""\((\d{6,11})\)""").find(title)?.groupValues?.get(1)?.toLongOrNull()?.let {
+        Regex("""\((\d+)\)""").find(title)?.groupValues?.get(1)?.toLongOrNull()?.let {
             return it
         }
         val bodyText = doc.body().text()
-        val codeMatch = Regex("""(?i)Version\s*code\s*[:\s]+(\d{6,11})""").find(bodyText)
+        val codeMatch = Regex("""(?i)Version\s*code\s*[:\s]+(\d+)""").find(bodyText)
         return codeMatch?.groupValues?.get(1)?.toLongOrNull()
     }
 
@@ -876,8 +1058,12 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         val dpi = cells.getOrNull(3)?.text()?.trim()?.takeIf(String::isNotBlank)
 
         val firstCellText = cells.firstOrNull()?.text().orEmpty()
-        val rowVersionCode = Regex("""\b(\d{6,11})\b""").find(firstCellText)?.groupValues?.get(1)?.toLongOrNull()
-            ?: Regex("""\b(\d{6,11})\b""").find(row.text())?.groupValues?.get(1)?.toLongOrNull()
+        val rowText = row.text()
+        val rowVersionCode = Regex("""\(\s*(\d+)\s*\)""").find(firstCellText)?.groupValues?.get(1)?.toLongOrNull()
+            ?: Regex("""(?i)(?:version\s*code|vc|build)\s*[:\s]+(\d+)""").find(rowText)?.groupValues?.get(1)?.toLongOrNull()
+            ?: Regex("""\(\s*(\d+)\s*\)""").find(rowText)?.groupValues?.get(1)?.toLongOrNull()
+            ?: Regex("""\b(\d{4,11})\b""").find(firstCellText)?.groupValues?.get(1)?.toLongOrNull()
+            ?: Regex("""\b(\d{4,11})\b""").find(rowText)?.groupValues?.get(1)?.toLongOrNull()
 
         return ApkMirrorVariant(
             url = url,
@@ -923,7 +1109,11 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
         return normalized == "nodpi" || normalized == "anydpi" || normalized.contains("120-640") || normalized == "all"
     }
 
-    private fun apkMirrorDownloadButtonUrl(doc: Document, isBundle: Boolean): String? {
+    private fun apkMirrorDownloadButtonUrl(
+        doc: Document,
+        isBundle: Boolean,
+        forceBaseApk: Boolean = false
+    ): String? {
         val urls = (
             doc.select("a.downloadButton[href]").map { it.attr("href") } +
                 doc.select("a[href*=/download/?key][href]").map { it.attr("href") }
@@ -931,10 +1121,16 @@ internal class ApkMirrorParser(private val ctx: SourceParserContext) : ApkSource
             .mapNotNull(::apkMirrorAbsoluteUrl)
             .distinct()
 
-        return if (isBundle) {
+        val selected = if (isBundle && !forceBaseApk) {
             urls.firstOrNull { !it.contains("forcebaseapk", ignoreCase = true) } ?: urls.firstOrNull()
         } else {
             urls.firstOrNull { it.contains("forcebaseapk", ignoreCase = true) } ?: urls.firstOrNull()
+        } ?: return null
+
+        return if (forceBaseApk && !selected.contains("forcebaseapk", ignoreCase = true)) {
+            if (selected.contains("?")) "$selected&forcebaseapk=true" else "$selected?forcebaseapk=true"
+        } else {
+            selected
         }
     }
 

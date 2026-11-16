@@ -330,4 +330,24 @@ class HelperRequestTest {
             file.delete()
         }
     }
+
+    @Test
+    fun deriveCandidateVersionCodes_extractsDirectAndCalculatedCodes() {
+        // X-plore pattern: 4.52.02 -> 45202
+        val xploreCodes = deriveCandidateVersionCodes("4.52.02")
+        assertTrue("Expected 45202 in derived codes: $xploreCodes", xploreCodes.contains(45202L))
+
+        // Semantic dot-separated: 4.52.2 -> 45202 (2-digit padding) or 4522
+        val semverCodes = deriveCandidateVersionCodes("4.52.2")
+        assertTrue("Expected 45202 in $semverCodes", semverCodes.contains(45202L))
+
+        // Pure numeric version: "723" -> 723
+        val numCodes = deriveCandidateVersionCodes("723")
+        assertEquals(listOf(723L), numCodes)
+
+        // Version with 'v' prefix: "v4.52.02" -> 45202
+        val vPrefixCodes = deriveCandidateVersionCodes("v4.52.02")
+        assertTrue("Expected 45202 in $vPrefixCodes", vPrefixCodes.contains(45202L))
+    }
 }
+

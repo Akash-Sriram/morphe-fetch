@@ -84,13 +84,17 @@ internal object ApkMirrorVersionResolver {
             if (isSecondaryRow && !requestedHasVariant) continue
 
             val firstCellText = row.select("div.table-cell").firstOrNull()?.text().orEmpty()
-            val rowVersionCode = Regex("""\b(\d{6,11})\b""").find(firstCellText)?.groupValues?.get(1)?.toLongOrNull()
-                ?: Regex("""\b(\d{6,11})\b""").find(rowText)?.groupValues?.get(1)?.toLongOrNull()
+            val rowVersionCode = Regex("""\(\s*(\d+)\s*\)""").find(firstCellText)?.groupValues?.get(1)?.toLongOrNull()
+                ?: Regex("""(?i)(?:version\s*code|vc|build)\s*[:\s]+(\d+)""").find(rowText)?.groupValues?.get(1)?.toLongOrNull()
+                ?: Regex("""\(\s*(\d+)\s*\)""").find(rowText)?.groupValues?.get(1)?.toLongOrNull()
+                ?: Regex("""\b(\d{4,11})\b""").find(firstCellText)?.groupValues?.get(1)?.toLongOrNull()
+                ?: Regex("""\b(\d{4,11})\b""").find(rowText)?.groupValues?.get(1)?.toLongOrNull()
             if (rowVersionCode != null && rowVersionCode > 0L) {
                 cacheVersionCode(packageName, versionName, rowVersionCode)
                 Log.i(TAG, "Resolved versionCode=$rowVersionCode for $packageName $versionName from APKMirror")
                 return@withContext rowVersionCode
             }
+
         }
         null
     }

@@ -874,6 +874,10 @@ internal fun validateDownloadedArtifact(
                 }
             }
 
+            if (metadata.minSdkVersion != null && metadata.minSdkVersion > Build.VERSION.SDK_INT) {
+                add("Incompatible Android version: app requires Android SDK ${metadata.minSdkVersion}+ (device is Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT})")
+            }
+
             // A secondary build (e.g. APKMirror's "-SECONDARY") shares its version
             // number with the normal release but is a different package Morphe
             // cannot patch. The source URL/file name betrays it even when the

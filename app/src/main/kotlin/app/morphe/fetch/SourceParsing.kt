@@ -99,7 +99,10 @@ internal class OkHttpSourceTextFetcher(
  */
 internal class SourceParserContext(
     val fetcher: SourceTextFetcher,
-    val apkPureApi: ApkPureApi
+    val apkPureApi: ApkPureApi,
+    val apkMirrorApi: ApkMirrorApi? = null,
+    val isSourceEnabled: (DownloadSource) -> Boolean = { true },
+    val followDirectRedirect: (suspend (String) -> String?)? = null
 ) {
     fun document(url: String, referer: String? = null): Document =
         Jsoup.parse(fetcher.fetchText(url, referer), url)
@@ -193,6 +196,15 @@ internal interface ApkSourceParser {
         request: HelperRequest,
         option: CandidateOption
     ): List<DownloadCandidate>
+
+    /**
+     * Continue from a page the Morphe resolver named for this source.
+     */
+    suspend fun findCandidatesFromResolvedUrl(
+        request: HelperRequest,
+        url: String,
+        option: CandidateOption
+    ): List<DownloadCandidate>? = null
 
     /** Web search/info URL for manual mode; null when the source has no web page. */
     fun searchUrl(packageName: String): String? = null

@@ -75,9 +75,9 @@ class SourceSortTest {
         assertEquals(
             listOf(
                 DownloadSource.AURORA,
+                DownloadSource.APK_MIRROR,
                 DownloadSource.APK_PURE,
-                DownloadSource.UPTODOWN,
-                DownloadSource.APK_MIRROR
+                DownloadSource.UPTODOWN
             ),
             sorted.map { it.source }
         )

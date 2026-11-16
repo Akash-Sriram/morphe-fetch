@@ -23,6 +23,35 @@ internal class ApkPureParser(private val ctx: SourceParserContext) : ApkSourcePa
 
     override fun searchUrl(packageName: String): String? = apkPureInfoUrl(packageName)
 
+    override suspend fun findCandidatesFromResolvedUrl(
+        request: HelperRequest,
+        url: String,
+        option: CandidateOption
+    ): List<DownloadCandidate>? {
+        val fileKind = fileKindFromUrl(url)
+        return listOf(
+            DownloadCandidate(
+                source = DownloadSource.APK_PURE,
+                name = request.appName,
+                packageName = request.packageName,
+                versionName = request.requestedVersionName,
+                versionCode = request.versionCode ?: request.requestedVersionCodes.firstOrNull(),
+                url = url,
+                fileKind = fileKind,
+                option = option,
+                directDownload = true,
+                versionStatus = if (option == CandidateOption.REQUESTED) VersionStatus.REQUESTED else VersionStatus.LATEST,
+                formatMatches = request.acceptsFormat(fileKind),
+                files = listOf(
+                    CandidateDownloadFile(
+                        url = url,
+                        fileName = "${request.packageName}-${request.requestedVersionName ?: option.name.lowercase(Locale.US)}-apkpure.$fileKind".sanitizeFileName()
+                    )
+                )
+            )
+        )
+    }
+
     override suspend fun resolveHistory(request: HelperRequest): List<DownloadCandidate> {
         val appPageUrl = runCatching { apkPureAppPageUrl(request) }
             .onFailure { Log.w(TAG, "APKPure app page resolve failed", it) }
@@ -112,8 +141,12 @@ internal class ApkPureParser(private val ctx: SourceParserContext) : ApkSourcePa
         }
 
         val candidates = apiLatestCandidates + listOfNotNull(webLatestCandidate)
-        if (candidates.isEmpty() && appPageUrl == null) {
-            throw SourceAppNotFoundException(request.packageName)
+        if (candidates.isEmpty()) {
+            val directCandidates = apkPureDirectLatestCandidates(request)
+            if (directCandidates.isNotEmpty()) return directCandidates
+            if (appPageUrl == null) {
+                throw SourceAppNotFoundException(request.packageName)
+            }
         }
         return candidates
     }
@@ -168,6 +201,11 @@ internal class ApkPureParser(private val ctx: SourceParserContext) : ApkSourcePa
             .getOrNull()
         if (apiCandidate != null) return apiCandidate
 
+        val directCandidate = runCatching { apkPureDirectRequestedCandidate(request) }
+            .onFailure { Log.w(TAG, "APKPure direct requested resolve failed", it) }
+            .getOrNull()
+        if (directCandidate != null) return directCandidate
+
         if (appPageUrl == null) {
             val apiHasApp = runCatching {
                 apkPureApi.getAppUpdate(
@@ -204,6 +242,61 @@ internal class ApkPureParser(private val ctx: SourceParserContext) : ApkSourcePa
                     request.matchesRequestedVersion(item.version_name, item.version_code)
             }
             ?.let { item -> apkPureApiCandidate(item, request, CandidateOption.REQUESTED) }
+    }
+
+    private suspend fun apkPureDirectLatestCandidates(request: HelperRequest): List<DownloadCandidate> {
+        val fileKinds = if (request.allowSplitArchive) listOf("apk", "xapk") else listOf("apk")
+        return fileKinds.mapNotNull { kind ->
+            val directUrl = ApkPureDirect.directUrl(request.packageName, fileKind = kind)
+            val resolved = ctx.followDirectRedirect?.invoke(directUrl) ?: return@mapNotNull null
+            val resolvedKind = if (resolved.contains(".xapk", ignoreCase = true) || kind == "xapk") "xapk" else "apk"
+            DownloadCandidate(
+                source = DownloadSource.APK_PURE,
+                name = request.appName,
+                packageName = request.packageName,
+                versionName = null,
+                versionCode = null,
+                url = resolved,
+                fileKind = resolvedKind,
+                option = CandidateOption.LATEST,
+                directDownload = true,
+                versionStatus = VersionStatus.LATEST,
+                formatMatches = request.acceptsFormat(resolvedKind),
+                files = listOf(
+                    CandidateDownloadFile(
+                        url = resolved,
+                        fileName = "${request.packageName}-latest-apkpure.$resolvedKind".sanitizeFileName()
+                    )
+                )
+            )
+        }
+    }
+
+    private suspend fun apkPureDirectRequestedCandidate(request: HelperRequest): DownloadCandidate? {
+        val versionCode = request.versionCode ?: request.requestedVersionCodes.firstOrNull() ?: return null
+        val fileKind = if (request.allowSplitArchive) "xapk" else "apk"
+        val directUrl = ApkPureDirect.directUrl(request.packageName, versionCode = versionCode, fileKind = fileKind)
+        val resolved = ctx.followDirectRedirect?.invoke(directUrl) ?: return null
+        val resolvedKind = if (resolved.contains(".xapk", ignoreCase = true) || fileKind == "xapk") "xapk" else "apk"
+        return DownloadCandidate(
+            source = DownloadSource.APK_PURE,
+            name = request.appName,
+            packageName = request.packageName,
+            versionName = request.requestedVersionName,
+            versionCode = versionCode,
+            url = resolved,
+            fileKind = resolvedKind,
+            option = CandidateOption.REQUESTED,
+            directDownload = true,
+            versionStatus = VersionStatus.REQUESTED,
+            formatMatches = request.acceptsFormat(resolvedKind),
+            files = listOf(
+                CandidateDownloadFile(
+                    url = resolved,
+                    fileName = "${request.packageName}-${request.requestedVersionName ?: versionCode}-apkpure.$resolvedKind".sanitizeFileName()
+                )
+            )
+        )
     }
 
     private fun apkPureInfoUrl(packageName: String): String =

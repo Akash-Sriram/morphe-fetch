@@ -59,20 +59,30 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
         OkHttpApkPureApi(apkPureClient, gson)
     }
 
+    private val apkMirrorApi by lazy {
+        OkHttpApkMirrorApi(apkMirrorClient, gson)
+    }
+
     private val parsers: Map<DownloadSource, ApkSourceParser> by lazy {
         val parserContext = SourceParserContext(
             fetcher = OkHttpSourceTextFetcher(
                 client,
                 hostGapsMillis = mapOf("apkmirror.com" to APKMIRROR_REQUEST_GAP_MS, "uptodown.com" to 500L)
             ),
-            apkPureApi = apkPureApi
+            apkPureApi = apkPureApi,
+            apkMirrorApi = apkMirrorApi,
+            isSourceEnabled = { it !in effectiveDisabledSources },
+            followDirectRedirect = { url -> ApkPureDirect.resolveRedirect(apkPureClient, url) }
         )
         val apkMirrorParserContext = SourceParserContext(
             fetcher = OkHttpSourceTextFetcher(
                 apkMirrorClient,
                 hostGapsMillis = mapOf("apkmirror.com" to APKMIRROR_REQUEST_GAP_MS, "uptodown.com" to 500L)
             ),
-            apkPureApi = apkPureApi
+            apkPureApi = apkPureApi,
+            apkMirrorApi = apkMirrorApi,
+            isSourceEnabled = { it !in effectiveDisabledSources },
+            followDirectRedirect = { url -> ApkPureDirect.resolveRedirect(apkPureClient, url) }
         )
         listOf(
             AuroraPlayParser(application, gplayClient, apkPureApi = apkPureApi),
@@ -156,9 +166,16 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
             request = newRequest
             startRequestLog(newRequest)
             offerExistingDownloadIfPresent(newRequest)
-            loadCandidates()
             if (helperSettings.autoDownloadBestMatch && newRequest.callerPackage.isNotBlank() && newRequest.hasRequestedVersionRequest) {
+                val initial = initialCandidateResult(newRequest)
+                uiState = UiState.Ready(initial)
+                selectedPagerPage = 0
+                appendLog(
+                    "Auto-fetch active: Sequential queue (Aurora -> APKMirror -> APKPure -> Uptodown)."
+                )
                 startAutoResolveAndDownload(newRequest)
+            } else {
+                loadCandidates()
             }
         } else {
             if (request == null) {
@@ -226,6 +243,8 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun clearRequest() {
+        autoDownloadJob?.cancel()
+        autoDownloadJob = null
         request = null
         uiState = UiState.Idle
         selectedPagerPage = 0
@@ -346,24 +365,42 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                 activeRequest
             }
 
-            val preferred = helperSettings.preferredSource
-            val wantsStandaloneApk = currentReq.requestedFileType?.equals("apk", ignoreCase = true) == true ||
-                !currentReq.allowSplitArchive
-            val defaultOrder = if (wantsStandaloneApk) {
-                listOf(
-                    DownloadSource.APK_MIRROR,
-                    DownloadSource.APK_PURE,
-                    DownloadSource.AURORA,
-                    DownloadSource.UPTODOWN
-                )
-            } else {
-                listOf(
-                    DownloadSource.AURORA,
-                    DownloadSource.APK_PURE,
-                    DownloadSource.APK_MIRROR,
-                    DownloadSource.UPTODOWN
-                )
+            // Step 1: Direct link / GitHub release check from hints or Morphe resolver
+            val allHints = (currentReq.sourceHintUrls + listOfNotNull(indexedUrl)).distinct()
+            if (allHints.isNotEmpty()) {
+                appendLog("Auto-fetch: Checking direct Morphe resolver links...")
+                val directCandidate = withContext(Dispatchers.IO) {
+                    allHints.filter { MorpheLinkParser.canParse(it) }
+                        .flatMap { url ->
+                            MorpheLinkParser.parseLink(
+                                url = url,
+                                request = currentReq,
+                                option = CandidateOption.REQUESTED,
+                                client = MorpheHttpClient.baseClient,
+                                parsers = parsers
+                            )
+                        }
+                        .firstOrNull { candidate ->
+                            candidate.directDownload &&
+                                candidate.formatMatches &&
+                                currentReq.isRequestedMatch(candidate)
+                        }
+                }
+                if (directCandidate != null) {
+                    appendLog("Auto-fetch: Verified direct link (${directCandidate.versionDisplay}). Starting download...")
+                    downloadAndReturn(directCandidate)
+                    return@launch
+                }
             }
+
+            // Step 2: Sequential queue: Aurora -> APKMirror -> APKPure -> Uptodown
+            val preferred = helperSettings.preferredSource
+            val defaultOrder = listOf(
+                DownloadSource.AURORA,
+                DownloadSource.APK_MIRROR,
+                DownloadSource.APK_PURE,
+                DownloadSource.UPTODOWN
+            )
             val sourcesToTry = (listOfNotNull(preferred) + defaultOrder)
                 .distinct()
                 .filter { it !in effectiveDisabledSources }

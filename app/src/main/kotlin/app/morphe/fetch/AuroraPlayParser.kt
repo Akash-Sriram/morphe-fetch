@@ -238,10 +238,30 @@ internal class AuroraPlayParser(
                     }
                 }
 
+                // Fallback: Attempt heuristic candidate version codes derived from the requested version name
+                if (targetVersionCode == null && !request.requestedVersionName.isNullOrBlank()) {
+                    val derivedCodes = deriveCandidateVersionCodes(request.requestedVersionName!!)
+                    for (code in derivedCodes) {
+                        val candidate = purchaseAndBuildCandidate(
+                            request = request,
+                            versionCode = code,
+                            versionName = request.requestedVersionName,
+                            option = CandidateOption.REQUESTED,
+                            gPlayClient = gPlayClient,
+                            authData = authData
+                        )
+                        if (candidate != null) {
+                            Log.i(TAG, "Purchased requested version code $code for ${request.packageName} via derived version code heuristic")
+                            return@findCandidatesInternal listOf(candidate)
+                        }
+                    }
+                }
+
                 if (targetVersionCode == null) {
                     Log.w(TAG, "Could not resolve version code for ${request.packageName} version='${request.requestedVersionName}'")
                     return@findCandidatesInternal emptyList()
                 }
+
 
                 val candidate = purchaseAndBuildCandidate(
                     request = request,

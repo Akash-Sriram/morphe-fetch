@@ -28,9 +28,7 @@ internal fun formatHistoryTimestamp(timestamp: Long): String =
 internal fun fileNameMimeType(fileName: String): String =
     when (fileName.substringAfterLast('.', "").lowercase(Locale.US)) {
         "apk" -> "application/vnd.android.package-archive"
-        "apkm" -> "application/x-apkm"
-        "apks" -> "application/x-apks"
-        "xapk" -> "application/x-xapk"
+        "apkm", "apks", "xapk" -> "application/octet-stream"
         else -> "application/octet-stream"
     }
 
@@ -43,9 +41,7 @@ internal fun Context.isHistoryUriUsable(uriString: String): Boolean {
 
 internal fun File.mimeType(): String = when (extension.lowercase(Locale.US)) {
     "apk" -> "application/vnd.android.package-archive"
-    "apkm" -> "application/x-apkm"
-    "apks" -> "application/x-apks"
-    "xapk" -> "application/x-xapk"
+    "apkm", "apks", "xapk" -> "application/octet-stream"
     else -> "application/octet-stream"
 }
 
@@ -155,10 +151,13 @@ internal fun Context.readDownloadedApkMetadataWithBundleCheck(file: File): Downl
                     val versionName = json.optString("version_name").takeIf { it.isNotBlank() }
                     val versionCode = json.optLong("version_code", -1L).takeIf { it > 0L }
                         ?: json.optString("version_code").toLongOrNull()
+                    val minSdk = json.optInt("min_sdk_version", 0).takeIf { it > 0 }
+                        ?: json.optString("min_sdk_version").toIntOrNull()
                     DownloadedApkMetadata(
                         packageName = packageName,
                         versionName = versionName,
-                        versionCode = versionCode
+                        versionCode = versionCode,
+                        minSdkVersion = minSdk
                     )
                 }.getOrNull()
                 if (manifestMetadata != null) {
@@ -225,6 +224,24 @@ internal fun Context.readDownloadedApkMetadataWithBundleCheck(file: File): Downl
 
 @Suppress("DEPRECATION")
 private fun Context.readApkMetadata(file: File): DownloadedApkMetadata? {
+    // 1. Try parsing binary XML via apk-parser
+    val parsedMeta = runCatching {
+        net.dongliu.apk.parser.ApkFile(file).use { apkFile ->
+            val meta = apkFile.apkMeta
+            DownloadedApkMetadata(
+                packageName = meta.packageName,
+                versionName = meta.versionName,
+                versionCode = meta.versionCode,
+                minSdkVersion = meta.minSdkVersion?.toIntOrNull()
+            )
+        }
+    }.getOrNull()
+
+    if (parsedMeta != null && parsedMeta.packageName.isNotBlank()) {
+        return parsedMeta
+    }
+
+    // 2. Fall back to Android PackageManager
     val pm = packageManager
     val info = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -242,10 +259,17 @@ private fun Context.readApkMetadata(file: File): DownloadedApkMetadata? {
         info.versionCode.toLong()
     }.takeIf { it > 0L }
 
+    val minSdk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        info.applicationInfo?.minSdkVersion
+    } else {
+        null
+    }
+
     return DownloadedApkMetadata(
         packageName = info.packageName,
         versionName = info.versionName,
-        versionCode = versionCode
+        versionCode = versionCode,
+        minSdkVersion = minSdk
     )
 }
 
@@ -363,6 +387,59 @@ internal fun String.trailingVersionCode(): Long? =
         ?.groupValues
         ?.getOrNull(1)
         ?.toLongOrNull()
+
+/**
+ * Derives potential Android version codes (build numbers) from a version string.
+ *
+ * Many Android apps generate `versionCode` using standard Gradle formulas:
+ * - Direct digits: "4.52.02" -> 45202 (e.g. X-plore)
+ * - 2-digit padding: major * 10000 + minor * 100 + patch (e.g. "4.52.2" -> 45202)
+ * - 3-digit padding: major * 100000 + minor * 1000 + patch (e.g. "4.52.2" -> 452002)
+ * - 4-part semantic: major * 1000000 + minor * 10000 + patch * 100 + build
+ */
+internal fun deriveCandidateVersionCodes(versionName: String): List<Long> {
+    val clean = versionName.withoutTrailingVersionCode().trim()
+        .removePrefix("v")
+        .removePrefix("V")
+        .trim()
+    if (clean.isBlank()) return emptyList()
+
+    return buildList {
+        // 1. Direct number if string contains only digits
+        clean.toLongOrNull()?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.let(::add)
+
+        // 2. Strip dots, dashes, etc. if it forms a reasonable digit sequence
+        val digitsOnly = clean.filter { it.isDigit() }
+        digitsOnly.toLongOrNull()?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.let(::add)
+
+        // 3. Dot-separated semantic components (e.g. 4.52.02 or 4.52.2 or 1.2.3.4)
+        val parts = clean.split('.').mapNotNull { p ->
+            Regex("""\d+""").find(p)?.value?.toLongOrNull()
+        }
+
+        if (parts.size >= 2) {
+            val p0 = parts[0]
+            val p1 = parts[1]
+            val p2 = parts.getOrNull(2) ?: 0L
+            val p3 = parts.getOrNull(3) ?: 0L
+
+            // a) 2 digits per component: major * 10000 + minor * 100 + patch
+            val code2 = p0 * 10000L + p1 * 100L + p2
+            if (code2 in 1L..Int.MAX_VALUE.toLong()) add(code2)
+
+            // b) 3 digits per component: major * 100000 + minor * 1000 + patch
+            val code3 = p0 * 100000L + p1 * 1000L + p2
+            if (code3 in 1L..Int.MAX_VALUE.toLong()) add(code3)
+
+            // c) 2 digits per component (4 parts): p0 * 1000000 + p1 * 10000 + p2 * 100 + p3
+            if (parts.size >= 3) {
+                val code4 = p0 * 1000000L + p1 * 10000L + p2 * 100L + p3
+                if (code4 in 1L..Int.MAX_VALUE.toLong()) add(code4)
+            }
+        }
+    }.filter { it > 0L }.distinct().take(4)
+}
+
 
 internal fun String.normalizedVersionName(): String =
     withoutTrailingVersionCode()
