@@ -852,12 +852,19 @@ internal class HelperViewModel(application: Application) : AndroidViewModel(appl
                 )
             }
             is DownloadJobManager.Event.PostDownloadStatus -> {
-                uiState = UiState.Downloading(
+                val current = uiState as? UiState.Downloading
+                uiState = current?.copy(
+                    percent = 100,
+                    speedBytesPerSec = 0.0,
+                    etaMs = null,
+                    statusMessage = event.status
+                ) ?: UiState.Downloading(
                     event.candidate,
                     percent = 100,
                     statusMessage = event.status
                 )
             }
+
             is DownloadJobManager.Event.Completed -> {
                 appendLog("Download completed: ${event.result.fileName}.")
                 cancelCompletionNotification()

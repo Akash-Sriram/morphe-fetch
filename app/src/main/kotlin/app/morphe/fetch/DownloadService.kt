@@ -497,16 +497,19 @@ internal class DownloadService : Service() {
             stagedFile to entryName
         }
 
-        ZipOutputStream(outputFile.outputStream()).use { zip ->
+        emitPostDownloadStatus(candidate, "Packaging split bundle (.apks)…")
+        ZipOutputStream(outputFile.outputStream().buffered()).use { zip ->
+            zip.setLevel(java.util.zip.Deflater.NO_COMPRESSION)
             staged.forEach { (stagedFile, entryName) ->
                 zip.putNextEntry(ZipEntry(entryName))
-                stagedFile.inputStream().use { input -> input.copyTo(zip) }
+                stagedFile.inputStream().buffered().use { input -> input.copyTo(zip) }
                 zip.closeEntry()
                 stagedFile.delete()
             }
         }
         return outputFile
     }
+
 
     private fun retryNotification(attempt: Int, delayMs: Long) {
         val candidate = DownloadJobManager.activeJob?.candidate ?: return

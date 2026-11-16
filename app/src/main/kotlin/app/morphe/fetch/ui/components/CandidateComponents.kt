@@ -338,15 +338,15 @@ internal fun DownloadingState(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val speed = formatTransferSpeed(state.speedBytesPerSec)
-                    if (speed.isNotEmpty()) {
+                    val statusText = state.statusMessage?.takeIf(String::isNotBlank)
+                    if (statusText != null) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            contentColor = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
+                            contentColor = MaterialTheme.colorScheme.tertiary
                         ) {
                             Text(
-                                text = speed,
+                                text = statusText,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -354,26 +354,45 @@ internal fun DownloadingState(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
-                    }
+                    } else {
+                        val speed = formatTransferSpeed(state.speedBytesPerSec)
+                        if (speed.isNotEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                contentColor = MaterialTheme.colorScheme.primary
+                            ) {
+                                Text(
+                                    text = speed,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
 
-                    if (state.etaMs != null && state.etaMs > 0L) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
-                            contentColor = MaterialTheme.colorScheme.secondary
-                        ) {
-                            Text(
-                                text = "${formatTransferEta(state.etaMs)} left",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                        if (state.etaMs != null && state.etaMs > 0L) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+                                contentColor = MaterialTheme.colorScheme.secondary
+                            ) {
+                                Text(
+                                    text = "${formatTransferEta(state.etaMs)} left",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
+
 
             // Styled progress bar with smooth rounded caps
             LinearProgressIndicator(

@@ -6,8 +6,6 @@
 
 A companion downloader and patch repository browser for [Morphe Manager](https://github.com/MorpheApp/morphe-manager).
 
-Forked from [`helper-for-morphe`](https://github.com/rushiranpise/helper-for-morphe) by [Rushi Ranpise](https://github.com/rushiranpise), maintained by [Akash Sriram](https://github.com/Akash-Sriram).
-
 ---
 
 ## Features
