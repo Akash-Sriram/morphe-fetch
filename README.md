@@ -22,7 +22,20 @@ Forked from [`helper-for-morphe`](https://github.com/rushiranpise/helper-for-mor
 
 ---
 
+## Acknowledgements
+
+- **[`helper-for-morphe`](https://github.com/rushiranpise/helper-for-morphe)** by [Rushi Ranpise](https://github.com/rushiranpise): Original Compose rewrite, source parsers, and Morphe download helper architecture.
+- **[`apkupdater`](https://github.com/rumboalla/apkupdater)** by [rumboalla](https://github.com/rumboalla):
+  - APKMirror 1-hop REST API (`app_exists`) request models and architecture.
+  - Wear OS (`wear_standalone`) and Android TV (`leanback_standalone`) capability filtering.
+  - Standalone single-APK resolution using `forcebaseapk=true`.
+  - APKPure 1-hop direct CDN resolution (`https://d.apkpure.com/b/...`).
+- **[`morphe-download-helper`](https://github.com/GeneralZyonix/morphe-download-helper)** by [GeneralZyonix](https://github.com/GeneralZyonix): Foundational helper protocol and early integration concepts.
+
+---
+
 ## License
 
 GPL-3.0 License. See [LICENSE](LICENSE) for details.
+
 
