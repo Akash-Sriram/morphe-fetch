@@ -13,6 +13,8 @@ internal const val PREFS_NAME = "helper_settings"
 
 internal data class HelperSettings(
     val downloadLocation: DownloadLocation = DownloadLocation.TEMPORARY,
+    val customDownloadTreeUri: String? = null,
+    val customDownloadFolderName: String? = null,
     val networkPolicy: NetworkPolicy = NetworkPolicy.WIFI_AND_MOBILE,
     val deleteTemporaryAfterHandoff: Boolean = true,
     val autoDownloadBestMatch: Boolean = false,
@@ -52,13 +54,18 @@ internal enum class DownloadLocation(
 ) {
     TEMPORARY(
         title = "Store in cache",
-        description = "Keep the file in Helper's cache and hand it off to Morphe  no visible copy is left behind."
+        description = "Keep the file in Helper's cache and hand it off to Morphe — no visible copy is left behind."
     ),
     DOWNLOADS(
         title = "Store in downloads",
         description = "Save a visible copy in Downloads/Morphe Fetch after the file checks out."
+    ),
+    CUSTOM(
+        title = "Store in custom folder",
+        description = "Save a copy in a custom folder chosen via the system folder picker."
     )
 }
+
 
 internal enum class NetworkPolicy(
     val title: String,
@@ -105,6 +112,8 @@ internal fun Context.loadHelperSettings(): HelperSettings {
             prefs.getString("download_location", null),
             DownloadLocation.TEMPORARY
         ),
+        customDownloadTreeUri = prefs.getString("custom_download_tree_uri", null),
+        customDownloadFolderName = prefs.getString("custom_download_folder_name", null),
         networkPolicy = enumValueOrDefault(
             prefs.getString("network_policy", null),
             NetworkPolicy.WIFI_AND_MOBILE
@@ -134,8 +143,11 @@ internal fun Context.saveHelperSettings(settings: HelperSettings) {
     getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .edit()
         .putString("download_location", settings.downloadLocation.name)
+        .putString("custom_download_tree_uri", settings.customDownloadTreeUri)
+        .putString("custom_download_folder_name", settings.customDownloadFolderName)
         .putString("network_policy", settings.networkPolicy.name)
         .putBoolean("delete_temporary_after_handoff", settings.deleteTemporaryAfterHandoff)
+
         .putBoolean("auto_download_best_match", settings.autoDownloadBestMatch)
         .putStringSet("disabled_sources", settings.disabledSources.map { it.name }.toSet())
         .putString("theme_mode", settings.themeMode.name)

@@ -42,6 +42,7 @@ internal object FileHandoffHelper {
         val uri = when (settings.downloadLocation) {
             DownloadLocation.TEMPORARY -> FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.files", file)
             DownloadLocation.DOWNLOADS -> context.copyToDownloads(file)
+            DownloadLocation.CUSTOM -> context.copyToCustomFolder(file, settings.customDownloadTreeUri)
         }
         val pending = PendingDownloadResult(
             uri = uri.toString(),
@@ -55,7 +56,10 @@ internal object FileHandoffHelper {
         DownloadJobManager.persistPendingResult(pending, context)
         AppIconResolver.cacheFromApkFile(context, candidate.packageName, file)
         context.recordHandOff(request, candidate, file, uri)
-        if (settings.downloadLocation == DownloadLocation.DOWNLOADS) {
+        if (settings.downloadLocation == DownloadLocation.DOWNLOADS ||
+            settings.downloadLocation == DownloadLocation.CUSTOM ||
+            settings.deleteTemporaryAfterHandoff
+        ) {
             context.scheduleTemporaryDelete(file)
         }
         return pending

@@ -532,6 +532,7 @@ internal fun SettingsChoiceDialog(
 internal fun DownloadLocation.icon(): ImageVector = when (this) {
     DownloadLocation.TEMPORARY -> Icons.Outlined.SdStorage
     DownloadLocation.DOWNLOADS -> Icons.Outlined.SaveAlt
+    DownloadLocation.CUSTOM -> Icons.Outlined.FolderOpen
 }
 
 internal fun NetworkPolicy.icon(): ImageVector = when (this) {

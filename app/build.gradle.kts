@@ -144,7 +144,9 @@ dependencies {
     implementation("com.auroraoss:gplayapi:3.6.4")
     implementation("com.google.protobuf:protobuf-javalite:4.35.1")
     implementation("net.dongliu:apk-parser:2.6.10")
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     testImplementation("junit:junit:4.13.2")
+
     testImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")
 }

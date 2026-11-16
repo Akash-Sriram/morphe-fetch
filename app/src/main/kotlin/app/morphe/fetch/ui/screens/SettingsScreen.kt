@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.documentfile.provider.DocumentFile
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.lifecycleScope
 import app.morphe.fetch.aurora.MicroGAccountTokenProvider
@@ -764,6 +765,29 @@ internal fun HelperSettingsScreen(
         DownloadSource.entries.filter { it !in settings.disabledSources }
     }
 
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                android.util.Log.w("Settings", "Failed to persist tree URI permission", e)
+            }
+            val folderName = DocumentFile.fromTreeUri(context, uri)?.name ?: "Custom folder"
+            onSettingsChange(
+                settings.copy(
+                    downloadLocation = DownloadLocation.CUSTOM,
+                    customDownloadTreeUri = uri.toString(),
+                    customDownloadFolderName = folderName
+                )
+            )
+        }
+    }
+
     if (!isExpanded && sourcesDialog) {
         val maxDialogHeight = (LocalConfiguration.current.screenHeightDp * 0.88f).dp
         Dialog(
@@ -865,8 +889,13 @@ internal fun HelperSettingsScreen(
             choices = locations.map { SettingsChoice(it.icon(), it.title, it.description) },
             selectedIndex = locations.indexOf(settings.downloadLocation),
             onSelect = { index ->
-                onSettingsChange(settings.copy(downloadLocation = locations[index]))
+                val selected = locations[index]
                 locationDialog = false
+                if (selected == DownloadLocation.CUSTOM) {
+                    folderPickerLauncher.launch(null)
+                } else {
+                    onSettingsChange(settings.copy(downloadLocation = selected))
+                }
             },
             onDismiss = { locationDialog = false }
         )
@@ -1298,10 +1327,10 @@ internal fun HelperSettingsScreen(
                             SettingsRow(
                                 icon = Icons.Outlined.FolderOpen,
                                 title = "Download Location",
-                                subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) {
-                                    "Downloads / Morphe Fetch"
-                                } else {
-                                    "App Cache (Temporary)"
+                                subtitle = when (settings.downloadLocation) {
+                                    DownloadLocation.TEMPORARY -> "App Cache (Temporary)"
+                                    DownloadLocation.DOWNLOADS -> "Downloads / Morphe Fetch"
+                                    DownloadLocation.CUSTOM -> settings.customDownloadFolderName ?: "Custom folder"
                                 },
                                 trailing = {
                                     Row(
@@ -1309,7 +1338,11 @@ internal fun HelperSettingsScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         MorpheStatusBadge(
-                                            text = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
+                                            text = when (settings.downloadLocation) {
+                                                DownloadLocation.TEMPORARY -> "App Cache"
+                                                DownloadLocation.DOWNLOADS -> "Downloads"
+                                                DownloadLocation.CUSTOM -> "Custom"
+                                            },
                                             tone = SemanticTone.Neutral
                                         )
                                         ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)
@@ -1493,10 +1526,10 @@ private fun SettingsPreferencesDetail(
                     SettingsRow(
                         icon = Icons.Outlined.FolderOpen,
                         title = "Download Location",
-                        subtitle = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) {
-                            "Downloads / Morphe Fetch"
-                        } else {
-                            "App Cache (Temporary)"
+                        subtitle = when (settings.downloadLocation) {
+                            DownloadLocation.TEMPORARY -> "App Cache (Temporary)"
+                            DownloadLocation.DOWNLOADS -> "Downloads / Morphe Fetch"
+                            DownloadLocation.CUSTOM -> settings.customDownloadFolderName ?: "Custom folder"
                         },
                         trailing = {
                             Row(
@@ -1504,7 +1537,11 @@ private fun SettingsPreferencesDetail(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 MorpheStatusBadge(
-                                    text = if (settings.downloadLocation == DownloadLocation.DOWNLOADS) "Downloads" else "App Cache",
+                                    text = when (settings.downloadLocation) {
+                                        DownloadLocation.TEMPORARY -> "App Cache"
+                                        DownloadLocation.DOWNLOADS -> "Downloads"
+                                        DownloadLocation.CUSTOM -> "Custom"
+                                    },
                                     tone = SemanticTone.Neutral
                                 )
                                 ForwardChevronIcon(size = MorpheDefaults.IconSizeSmall)

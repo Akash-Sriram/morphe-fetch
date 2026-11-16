@@ -21,6 +21,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
+import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.util.Locale
 import java.util.zip.ZipEntry
@@ -347,10 +348,18 @@ internal class DownloadService : Service() {
         val candidate = job.candidate
         val settings = job.settings
 
-        emitPostDownloadStatus(candidate, "Copying to Downloads…")
+        emitPostDownloadStatus(
+            candidate,
+            when (settings.downloadLocation) {
+                DownloadLocation.TEMPORARY -> "Preparing file handoff…"
+                DownloadLocation.DOWNLOADS -> "Copying to Downloads…"
+                DownloadLocation.CUSTOM -> "Saving to ${settings.customDownloadFolderName ?: "custom folder"}…"
+            }
+        )
         val uri = when (settings.downloadLocation) {
             DownloadLocation.TEMPORARY -> FileProvider.getUriForFile(this, "${BuildConfig.APPLICATION_ID}.files", file)
             DownloadLocation.DOWNLOADS -> copyToDownloads(file)
+            DownloadLocation.CUSTOM -> copyToCustomFolder(file, settings.customDownloadTreeUri)
         }
         grantUriPermission(request.callerPackage, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
@@ -368,9 +377,13 @@ internal class DownloadService : Service() {
         AppIconResolver.cacheFromApkFile(this, candidate.packageName, file)
         recordHandOff(request, candidate, file, uri)
 
-        if (settings.downloadLocation == DownloadLocation.DOWNLOADS) {
+        if (settings.downloadLocation == DownloadLocation.DOWNLOADS ||
+            settings.downloadLocation == DownloadLocation.CUSTOM ||
+            settings.deleteTemporaryAfterHandoff
+        ) {
             scheduleTemporaryDelete(file)
         }
+
 
         DownloadJobManager.emit(DownloadJobManager.Event.Completed(result, job.epoch))
         notifyCompletion(job, result)
@@ -801,6 +814,24 @@ internal fun Context.copyToDownloads(file: File): Uri {
         file.copyTo(output, overwrite = true)
         FileProvider.getUriForFile(this, "${BuildConfig.APPLICATION_ID}.files", output)
     }
+}
+
+internal fun Context.copyToCustomFolder(file: File, treeUriString: String?): Uri {
+    if (treeUriString.isNullOrBlank()) return copyToDownloads(file)
+    val treeUri = Uri.parse(treeUriString)
+    val root = DocumentFile.fromTreeUri(this, treeUri)
+        ?: return copyToDownloads(file)
+    if (!root.canWrite()) return copyToDownloads(file)
+
+    root.findFile(file.name)?.delete()
+    val targetDoc = root.createFile(file.mimeType(), file.name)
+        ?: return copyToDownloads(file)
+
+    contentResolver.openOutputStream(targetDoc.uri)?.use { output ->
+        file.inputStream().buffered().use { input -> input.copyTo(output) }
+    } ?: return copyToDownloads(file)
+
+    return targetDoc.uri
 }
 
 internal class VersionCodeMismatchException(
