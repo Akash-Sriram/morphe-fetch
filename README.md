@@ -1,5 +1,11 @@
 # Morphe Fetch
 
+> [!IMPORTANT]
+> **Repository Archived**: Now that upstream [**Morphe Helper (`helper-for-morphe`)**](https://github.com/rushiranpise/helper-for-morphe) has integrated app discovery ("Find New Apps") and community archive browsing, Morphe Fetch is archived to avoid redundant work and unite community efforts upstream.
+>
+> Please use and contribute to [**rushiranpise/helper-for-morphe**](https://github.com/rushiranpise/helper-for-morphe) for ongoing updates.
+
+[![Archived](https://img.shields.io/badge/Status-Archived-red?style=flat-square)](https://github.com/Akash-Sriram/morphe-fetch)
 [![Latest Release](https://img.shields.io/github/v/release/Akash-Sriram/morphe-fetch?color=007AFF&style=flat-square)](https://github.com/Akash-Sriram/morphe-fetch/releases/latest)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](https://developer.android.com)
 [![License](https://img.shields.io/github/license/Akash-Sriram/morphe-fetch?style=flat-square)](LICENSE)
