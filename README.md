@@ -20,6 +20,19 @@ A companion downloader and patch repository browser for [Morphe Manager](https:/
 
 ---
 
+## Installation & Google Play Protect
+
+Download the latest APK from the [Releases](https://github.com/Akash-Sriram/morphe-fetch/releases/latest) page.
+
+> [!NOTE]
+> **Google Play Protect Notice**: Because Morphe Fetch is an open-source tool requesting package management (`REQUEST_INSTALL_PACKAGES`) and account (`GET_ACCOUNTS`) permissions outside of the Google Play Store, Play Protect may occasionally show a *"Harmful app blocked"* prompt on fresh releases before install reputation builds up.
+>
+> To proceed with installation:
+> 1. Tap **"More details ∨"** on the prompt.
+> 2. Tap **"Install anyway"**.
+
+---
+
 ## Acknowledgements
 
 - **[`helper-for-morphe`](https://github.com/rushiranpise/helper-for-morphe)** by [Rushi Ranpise](https://github.com/rushiranpise): Original Compose rewrite, source parsers, and Morphe download helper architecture.
